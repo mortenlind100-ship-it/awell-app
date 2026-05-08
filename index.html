@@ -10,10 +10,15 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body, #root { height: 100%; }
     body { background: #dce8f5; }
+    .app { height: 100vh; }
+    .kort-wrap { height: calc(100vh - 120px); display: flex; flex-direction: column; }
+    #awell-map { flex: 1; min-height: 200px; }
   </style>
 </head>
 <body>
@@ -449,10 +454,137 @@ const STYLES = `
   }
   .pump-photo-btn:active { background: var(--blue4); }
 
+  /* ── Jupiter ── */
+  .jupiter-wrap { padding: 16px; padding-bottom: 40px; overflow-y: auto; flex: 1; }
+  .jupiter-search {
+    display: flex; gap: 8px; margin-bottom: 16px;
+  }
+  .jupiter-search input {
+    flex: 1; background: #fff; border: 1.5px solid #9ab5d4;
+    border-radius: 7px; color: var(--text); font-family: var(--font);
+    font-size: 15px; padding: 11px 13px; outline: none;
+    transition: border-color 0.15s;
+  }
+  .jupiter-search input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(17,105,176,0.15); }
+  .jupiter-search button {
+    background: linear-gradient(135deg, var(--blue2), var(--blue));
+    color: #fff; border: none; border-radius: 7px;
+    padding: 11px 16px; font-family: var(--font-head); font-size: 12px;
+    font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    cursor: pointer; white-space: nowrap;
+  }
+  .jupiter-search button:active { opacity: 0.85; }
+  .jupiter-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--blue3); border: 1px solid var(--blue4);
+    border-radius: 20px; padding: 4px 12px; margin-bottom: 14px;
+    font-family: var(--font-head); font-size: 11px; font-weight: 700;
+    color: var(--blue); text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .jupiter-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .jupiter-section { margin-bottom: 18px; }
+  .jupiter-row {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 8px 0; border-bottom: 1px solid #e0eaf4;
+    gap: 8px;
+  }
+  .jupiter-row:last-child { border-bottom: none; }
+  .jupiter-row .jk {
+    font-family: var(--font-head); font-size: 11px; font-weight: 700;
+    color: var(--text2); text-transform: uppercase; letter-spacing: 0.06em;
+    flex-shrink: 0; min-width: 130px;
+  }
+  .jupiter-row .jv {
+    font-size: 13px; color: var(--text); font-weight: 500; text-align: right;
+  }
+  .jupiter-spinner {
+    text-align: center; padding: 40px 20px;
+    font-family: var(--font-head); font-size: 12px; color: var(--text2);
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .jupiter-spinner .spin {
+    display: inline-block; width: 32px; height: 32px;
+    border: 3px solid var(--blue3); border-top-color: var(--blue);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-bottom: 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .jupiter-error {
+    background: #fff0f0; border: 1.5px solid #f5c0c0;
+    border-radius: 8px; padding: 14px; color: var(--red);
+    font-size: 13px; margin-bottom: 14px;
+    font-family: var(--font-head); font-weight: 600;
+  }
+  .jupiter-lithology {
+    display: flex; flex-direction: column; gap: 0;
+    border-radius: 8px; overflow: hidden;
+    border: 1px solid #a8c4de; margin-top: 4px;
+  }
+  .lith-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 10px; border-bottom: 1px solid #dceaf5;
+    font-size: 12px;
+  }
+  .lith-row:last-child { border-bottom: none; }
+  .lith-depth { font-family: var(--font-head); font-size: 11px; font-weight: 700; color: var(--blue); min-width: 80px; }
+  .lith-desc { color: var(--text); flex: 1; }
+  .lith-color { width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.15); }
+
   /* Scrollbar */
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: var(--grey0); }
   ::-webkit-scrollbar-thumb { background: var(--blue4); border-radius: 2px; }
+
+  /* ── Kort ── */
+  .kort-wrap {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #awell-map {
+    flex: 1; width: 100%; min-height: 0;
+  }
+  .kort-panel {
+    background: #fff;
+    border-top: 2px solid var(--blue);
+    max-height: 52vh;
+    overflow-y: auto;
+    padding: 14px 16px 24px;
+  }
+  .kort-panel-title {
+    font-family: var(--font-head); font-weight: 800;
+    font-size: 15px; color: var(--blue);
+    margin-bottom: 4px;
+  }
+  .kort-panel-coord {
+    font-size: 11px; color: var(--text2); margin-bottom: 12px;
+  }
+  .kort-data-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 6px; margin-bottom: 12px;
+  }
+  .kort-data-cell {
+    background: var(--grey0); border: 1px solid #a8c4de;
+    border-radius: 6px; padding: 7px 10px;
+  }
+  .kort-data-cell .k { font-family: var(--font-head); font-size: 9px; font-weight: 700; color: var(--text2); text-transform: uppercase; letter-spacing: 0.07em; }
+  .kort-data-cell .v { font-size: 13px; color: var(--blue); font-weight: 600; margin-top: 1px; }
+  .kort-task-item {
+    border-left: 3px solid var(--blue);
+    padding: 8px 10px; margin-bottom: 8px;
+    background: var(--grey0); border-radius: 0 6px 6px 0;
+  }
+  .kort-task-item .kt-header { display: flex; justify-content: space-between; align-items: center; }
+  .kort-task-item .kt-tag { font-family: var(--font-head); font-size: 10px; font-weight: 700; background: var(--blue); color: #fff; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }
+  .kort-task-item .kt-date { font-size: 10px; color: var(--text2); }
+  .kort-task-item .kt-notes { font-size: 12px; color: var(--text); margin-top: 4px; }
+  .kort-img-row { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
+  .kort-img-row img { height: 64px; width: 64px; object-fit: cover; border-radius: 6px; flex-shrink: 0; border: 1px solid #a8c4de; }
+  .kort-close {
+    position: absolute; top: 10px; right: 14px;
+    background: none; border: none; font-size: 22px; color: var(--grey3); cursor: pointer;
+  }
+  .kort-panel-wrap { position: relative; }
+  .leaflet-popup-content-wrapper { border-radius: 8px !important; }
 `;
 // ── Constants ────────────────────────────────────────────────────────────────
 const TASK_TYPES = [
@@ -525,6 +657,98 @@ function ImageCapture({ images, onAdd, onRemove }) {
   );
 }
 
+// ── MapView component (Leaflet) ───────────────────────────────────────────────
+function MapView({ wells, tasks, onSelectWell, mapInstanceRef, markersRef, mapRef }) {
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (mapInstanceRef.current) {
+      // Update markers when wells/tasks change without re-creating map
+      markersRef.current.forEach(m => m.remove());
+      markersRef.current = [];
+      addMarkers();
+      return;
+    }
+
+    // Default center: Denmark
+    const defaultLat = 56.0, defaultLng = 10.5;
+    const validWells = wells.filter(w => w.lat && w.lng);
+    const centerLat = validWells.length ? validWells[0].lat : defaultLat;
+    const centerLng = validWells.length ? validWells[0].lng : defaultLng;
+
+    const map = window.L.map(mapRef.current, {
+      center: [centerLat, centerLng],
+      zoom: validWells.length > 1 ? 10 : 14,
+      zoomControl: true,
+    });
+    mapInstanceRef.current = map;
+
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(map);
+
+    addMarkers();
+
+    // Fit bounds if multiple wells
+    if (validWells.length > 1) {
+      const bounds = window.L.latLngBounds(validWells.map(w => [parseFloat(w.lat), parseFloat(w.lng)]));
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+
+    function addMarkers() {
+      const map = mapInstanceRef.current;
+      wells.filter(w => w.lat && w.lng).forEach(w => {
+        const wellTaskCount = tasks.filter(t => t.wellId === w.id).length;
+        const icon = window.L.divIcon({
+          className: "",
+          html: `<div style="
+            background: #1169b0;
+            border: 3px solid #fff;
+            border-radius: 50% 50% 50% 0;
+            transform: rotate(-45deg);
+            width: 32px; height: 32px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+          "><span style="transform: rotate(45deg); font-size: 14px; display: block; text-align: center; line-height: 26px;">${wellTaskCount > 0 ? "⛏️" : "⚪"}</span></div>
+          ${wellTaskCount > 0 ? `<div style="position:absolute;top:-6px;right:-6px;background:#E8500A;color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 5px;font-family:sans-serif;">${wellTaskCount}</div>` : ""}`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 32],
+          popupAnchor: [0, -34],
+        });
+        const marker = window.L.marker([parseFloat(w.lat), parseFloat(w.lng)], { icon })
+          .addTo(map)
+          .on("click", () => onSelectWell(w));
+        markersRef.current.push(marker);
+      });
+    }
+
+    return () => {
+      // don't destroy on re-render, only on unmount
+    };
+  }, [wells, tasks]);
+
+  // Re-add markers when data changes but map exists
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+    wells.filter(w => w.lat && w.lng).forEach(w => {
+      const wellTaskCount = tasks.filter(t => t.wellId === w.id).length;
+      const icon = window.L.divIcon({
+        className: "",
+        html: `<div style="background:#1169b0;border:3px solid #fff;border-radius:50% 50% 50% 0;transform:rotate(-45deg);width:32px;height:32px;box-shadow:0 2px 8px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;"><span style="transform:rotate(45deg);font-size:14px;display:block;text-align:center;line-height:26px;">${wellTaskCount > 0 ? "⛏️" : "⚪"}</span></div>${wellTaskCount > 0 ? `<div style="position:absolute;top:-6px;right:-6px;background:#E8500A;color:#fff;border-radius:10px;font-size:10px;font-weight:700;padding:1px 5px;font-family:sans-serif;">${wellTaskCount}</div>` : ""}`,
+        iconSize: [32, 32], iconAnchor: [16, 32],
+      });
+      const marker = window.L.marker([parseFloat(w.lat), parseFloat(w.lng)], { icon })
+        .addTo(mapInstanceRef.current)
+        .on("click", () => onSelectWell(w));
+      markersRef.current.push(marker);
+    });
+  }, [wells, tasks]);
+
+  return <div ref={mapRef} id="awell-map" style={{ flex: 1, minHeight: 0 }} />;
+}
+
 // ── Pump photo component ──────────────────────────────────────────────────────
 function PumpImageCapture({ image, onAdd, onRemove }) {
   const inputRef = useRef();
@@ -561,6 +785,14 @@ function App() {
   const [activeTask, setActiveTask] = useState(null);
   const [gps, setGps] = useState({ status: "waiting", lat: null, lng: null, acc: null, ts: null });
   const [toast, setToast] = useState(null);
+  const [selectedMapWell, setSelectedMapWell] = useState(null);
+  const [jupiterDgu, setJupiterDgu] = useState("182.218");
+  const [jupiterData, setJupiterData] = useState(null);
+  const [jupiterLoading, setJupiterLoading] = useState(false);
+  const [jupiterError, setJupiterError] = useState(null);
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
 
   // GPS
   useEffect(() => {
@@ -1108,8 +1340,317 @@ function App() {
     </div>
   );
 
+  // ── Jupiter ──
+  const fetchJupiter = async (dgu) => {
+    const raw = dgu.trim().replace(/^dgu\s*/i, "").trim();
+    if (!raw) return;
+    setJupiterLoading(true);
+    setJupiterError(null);
+    setJupiterData(null);
+
+    // Helper: try a single URL and return parsed JSON or throw
+    const tryFetch = async (url) => {
+      const r = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    };
+
+    try {
+      let data = null;
+
+      // 1. Try Vercel proxy first (works when deployed on Vercel)
+      const isVercel = window.location.hostname !== "localhost" &&
+                       !window.location.protocol.startsWith("file");
+      if (isVercel) {
+        try {
+          const r = await fetch(`/api/jupiter?dgu=${encodeURIComponent(raw)}`);
+          const d = await r.json();
+          if (r.ok) { data = d; }
+          else if (d.error) throw new Error(d.error);
+        } catch(proxyErr) {
+          // proxy failed – fall through to direct attempt
+          console.warn("Proxy fejl:", proxyErr.message);
+        }
+      }
+
+      // 2. Try direct GEUS call (works if GEUS enables CORS, or from local dev)
+      if (!data) {
+        const base = "https://data.geus.dk/JupiterWWW/api/v1";
+        const list = await tryFetch(`${base}/boringer?dguNr=${encodeURIComponent(raw)}`);
+        const hits = Array.isArray(list) ? list : (list.boringer || list.results || []);
+        if (!hits.length) throw new Error(`Ingen boring fundet for DGU ${raw}`);
+        const boring = hits[0];
+        const id = boring.boringsid || boring.boringId || boring.id;
+        const [dR, lR, vR] = await Promise.allSettled([
+          id ? tryFetch(`${base}/boringer/${id}`) : Promise.reject(),
+          id ? tryFetch(`${base}/boringer/${id}/loglitologi`) : Promise.reject(),
+          id ? tryFetch(`${base}/boringer/${id}/vandstand`) : Promise.reject(),
+        ]);
+        data = {
+          boring: dR.status==="fulfilled" ? dR.value : boring,
+          litho: lR.status==="fulfilled" ? (Array.isArray(lR.value) ? lR.value : (lR.value.litologi||[])) : [],
+          vandstand: vR.status==="fulfilled" ? (Array.isArray(vR.value) ? vR.value : (vR.value.vandstand||[])) : [],
+          dgu: raw,
+        };
+      }
+
+      setJupiterData({ ...data, dgu: raw });
+
+    } catch (e) {
+      const msg = e.message || "";
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("CORS")) {
+        setJupiterError(
+          "CORS-fejl: GEUS Jupiter tillader ikke direkte browser-kald. " +
+          "Deploy appen på Vercel og sørg for at api/jupiter.js er uploadet til GitHub."
+        );
+      } else {
+        setJupiterError(msg || "Ukendt fejl ved hentning fra Jupiter");
+      }
+    }
+    setJupiterLoading(false);
+  };
+
+  const LITHO_COLORS = {
+    "ler": "#c4a35a", "sand": "#e8d5a0", "grus": "#c8b88a", "kalk": "#e0e0d0",
+    "kridt": "#f0f0e8", "moræneler": "#a87850", "morænesand": "#d4b870",
+    "silt": "#d8c898", "tørv": "#8B6914", "fyldjord": "#9a8878",
+    "flint": "#888880", "granit": "#b8a8a0", "gnejs": "#a89898",
+  };
+  const lithoColor = (desc) => {
+    if (!desc) return "#e0e0e0";
+    const d = desc.toLowerCase();
+    for (const [k, v] of Object.entries(LITHO_COLORS)) { if (d.includes(k)) return v; }
+    return "#d0d8e4";
+  };
+
+  const JRow = ({ k, v }) => v != null && v !== "" && v !== undefined ? (
+    <div className="jupiter-row"><span className="jk">{k}</span><span className="jv">{v}</span></div>
+  ) : null;
+
+  const renderJupiter = () => {
+    const b = jupiterData?.boring || {};
+    const litho = jupiterData?.litho || [];
+    const vandstand = jupiterData?.vandstand || [];
+    const latestVand = vandstand.length ? [...vandstand].sort((a,b) => new Date(b.dato||b.date||0) - new Date(a.dato||a.date||0))[0] : null;
+
+    return (
+      <div className="jupiter-wrap">
+        {/* GEUS logo strip */}
+        <div style={{ display:"flex", alignItems:"center", gap:10, background:"#fff", border:"1px solid #a8c4de", borderRadius:8, padding:"10px 14px", marginBottom:14 }}>
+          <div style={{ background:"#1169b0", borderRadius:6, width:32, height:32, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff", fontFamily:"var(--font-head)", fontWeight:800, fontSize:13, flexShrink:0 }}>G</div>
+          <div>
+            <div style={{ fontFamily:"var(--font-head)", fontWeight:700, fontSize:13, color:"var(--blue)" }}>GEUS Jupiter Database</div>
+            <div style={{ fontSize:10, color:"var(--text2)" }}>Danmarks geologiske undersøgelse</div>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="jupiter-search">
+          <input
+            value={jupiterDgu}
+            onChange={e => setJupiterDgu(e.target.value)}
+            placeholder="DGU nummer, f.eks. 182.218"
+            onKeyDown={e => e.key === "Enter" && fetchJupiter(jupiterDgu)}
+          />
+          <button onClick={() => fetchJupiter(jupiterDgu)}>Søg</button>
+        </div>
+
+        {!jupiterData && !jupiterLoading && !jupiterError && (
+          <div className="empty" style={{ paddingTop:30 }}>
+            <div className="icon">🔎</div>
+            <p>Indtast et DGU-nummer og tryk Søg for at hente data fra Jupiter</p>
+          </div>
+        )}
+
+        {jupiterLoading && (
+          <div className="jupiter-spinner">
+            <div className="spin" />
+            <div>Henter fra Jupiter…</div>
+          </div>
+        )}
+
+        {jupiterError && (
+          <div className="jupiter-error">
+            <div style={{ marginBottom: 6 }}>⚠️ {jupiterError}</div>
+            {jupiterError.includes("CORS") && (
+              <div style={{ fontSize: 11, fontWeight: 400, color: "var(--red)", marginTop: 6, lineHeight: 1.5 }}>
+                <strong>Løsning:</strong> Sørg for at filen <code style={{ background:"#ffe0e0", padding:"1px 4px", borderRadius:3 }}>api/jupiter.js</code> er uploadet til GitHub og Vercel er redeployet.
+              </div>
+            )}
+          </div>
+        )}
+
+        {jupiterData && !jupiterLoading && (<>
+          <div className="jupiter-badge">
+            <span className="dot" />
+            DGU {jupiterData.dgu}
+          </div>
+
+          {/* Stamdata */}
+          <div className="section-label">Stamdata</div>
+          <div className="card">
+            <JRow k="DGU-nummer" v={b.dgUnr || b.dguNr || b.dgu_nr || jupiterData.dgu} />
+            <JRow k="Boring ID" v={b.boringsid || b.boringId} />
+            <JRow k="Boringens navn" v={b.boringsNavn || b.navn || b.name} />
+            <JRow k="Type" v={b.boringensFormaal || b.formaal || b.anlaegType || b.type} />
+            <JRow k="Status" v={b.boringsStatus || b.status} />
+            <JRow k="Slutdato" v={b.slutdato || b.slut_dato} />
+            <JRow k="Indberetningsdato" v={b.indberetningsDato || b.indberetningsdato} />
+          </div>
+
+          {/* Placering */}
+          <div className="section-label">Placering</div>
+          <div className="card">
+            <JRow k="Kommune" v={b.kommunenavn || b.kommune || b.municipalityName} />
+            <JRow k="Adresse" v={[b.vejnavn, b.husnr, b.postnr, b.postdistrikt].filter(Boolean).join(" ")} />
+            <JRow k="UTM X (E)" v={b.utmx || b.xkoordinat || b.x} />
+            <JRow k="UTM Y (N)" v={b.utmy || b.ykoordinat || b.y} />
+            <JRow k="Koordinatmetode" v={b.koordinatMetode || b.koord_metode} />
+            <JRow k="Terrænkote (m.o.h.)" v={b.koteSaet || b.kote || b.terraenkote} />
+          </div>
+
+          {/* Tekniske data */}
+          <div className="section-label">Tekniske data</div>
+          <div className="card">
+            <JRow k="Boringstype" v={b.boremetode || b.borings_metode || b.drillMethod} />
+            <JRow k="Totaldybde (m)" v={b.boringsDybde || b.totalDybde || b.dybde} />
+            <JRow k="Forerørsdybde (m)" v={b.forerørsDybde || b.forerorDybde} />
+            <JRow k="Forerør materiale" v={b.forerørsMateriale || b.forerorMateriale} />
+            <JRow k="Forerør indre Ø (mm)" v={b.forerørsIndreDiameter || b.indreDiameter} />
+            <JRow k="Filterrør fra (m)" v={b.filterrorFra || b.filterFra} />
+            <JRow k="Filterrør til (m)" v={b.filterrorTil || b.filterTil} />
+            <JRow k="Filtertype" v={b.filterType || b.filterrorType} />
+          </div>
+
+          {/* Vandstand */}
+          {latestVand && (<>
+            <div className="section-label">Seneste vandstand</div>
+            <div className="card">
+              <JRow k="Dato" v={latestVand.dato || latestVand.date || latestVand.maaledato} />
+              <JRow k="Vandspejl (m u.t.)" v={latestVand.vandspejl || latestVand.pejling || latestVand.niveau} />
+              <JRow k="Vandkote (m.o.h.)" v={latestVand.vandkote || latestVand.kote} />
+              <JRow k="Måler" v={latestVand.maalerNavn || latestVand.operatoer} />
+            </div>
+          </>)}
+
+          {/* Litologi */}
+          {litho.length > 0 && (<>
+            <div className="section-label">Litologi ({litho.length} lag)</div>
+            <div className="card" style={{ padding:"8px 12px" }}>
+              <div className="jupiter-lithology">
+                {litho.slice(0,30).map((l, i) => (
+                  <div key={i} className="lith-row">
+                    <div className="lith-depth">{l.fraM ?? l.fra_m ?? l.dybdeFra ?? "?"} – {l.tilM ?? l.til_m ?? l.dybdeTil ?? "?"} m</div>
+                    <div className="lith-desc">{l.litologiTekst || l.lithology || l.beskrivelse || l.tekst || "–"}</div>
+                    <div className="lith-color" style={{ background: lithoColor(l.litologiTekst || l.lithology || l.beskrivelse) }} />
+                  </div>
+                ))}
+                {litho.length > 30 && <div style={{ padding:"6px 10px", fontSize:11, color:"var(--text2)", fontStyle:"italic" }}>+ {litho.length-30} yderligere lag…</div>}
+              </div>
+            </div>
+          </>)}
+
+          <div style={{ textAlign:"center", fontSize:10, color:"var(--text2)", marginTop:8 }}>
+            Data fra GEUS Jupiter – <a href={`https://data.geus.dk/JupiterWWW/#dguNr=${jupiterData.dgu}`} target="_blank" rel="noopener" style={{ color:"var(--blue)" }}>Åbn i Jupiter online</a>
+          </div>
+        </>)}
+      </div>
+    );
+  };
+
+  // ── Kort ──
+  const renderKort = () => {
+    const sw = selectedMapWell;
+    const wellTasks = sw ? tasks.filter(t => t.wellId === sw.id) : [];
+    const taskLabel = id => TASK_TYPES.find(t => t.id === id)?.label.replace("\n"," ") || id;
+
+    return (
+      <div className="kort-wrap" style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+        <MapView
+          wells={wells}
+          tasks={tasks}
+          onSelectWell={setSelectedMapWell}
+          mapInstanceRef={mapInstanceRef}
+          markersRef={markersRef}
+          mapRef={mapRef}
+        />
+        {sw && (
+          <div className="kort-panel-wrap" style={{ position: "relative" }}>
+            <div className="kort-panel">
+              <button className="kort-close" onClick={() => setSelectedMapWell(null)}>×</button>
+              <div className="kort-panel-title">⛏️ {sw.name}</div>
+              <div className="kort-panel-coord">📍 {fmtCoord(sw.lat, sw.lng)}</div>
+
+              <div className="kort-data-grid">
+                {sw.depth && <div className="kort-data-cell"><div className="k">Bundpejling</div><div className="v">{sw.depth} m</div></div>}
+                {sw.rovand && <div className="kort-data-cell"><div className="k">Rovandspejling</div><div className="v">{sw.rovand} m</div></div>}
+                {sw.maalepunkt && <div className="kort-data-cell"><div className="k">Målepunkt</div><div className="v">{sw.maalepunkt}</div></div>}
+                {sw.maalepunktHoejde && <div className="kort-data-cell"><div className="k">Højde m.o.t.</div><div className="v">{sw.maalepunktHoejde} m</div></div>}
+                {sw.casing?.innerDia && <div className="kort-data-cell"><div className="k">Forerør indre Ø</div><div className="v">{sw.casing.innerDia} mm</div></div>}
+                {sw.casing?.outerDia && <div className="kort-data-cell"><div className="k">Forerør ydre Ø</div><div className="v">{sw.casing.outerDia} mm</div></div>}
+                {sw.casing?.material && <div className="kort-data-cell"><div className="k">Forerør mat.</div><div className="v">{sw.casing.material}</div></div>}
+                {sw.casing?.flangeDN && <div className="kort-data-cell"><div className="k">Flange DN</div><div className="v">{sw.casing.flangeDN}</div></div>}
+                {sw.hasPump && sw.pump?.type && <div className="kort-data-cell"><div className="k">Pumpetype</div><div className="v">{sw.pump.type}</div></div>}
+                {sw.hasPump && sw.pump?.riserDim && <div className="kort-data-cell"><div className="k">Stigrør dim.</div><div className="v">{sw.pump.riserDim === "Andet" ? sw.pump.riserDimCustom : sw.pump.riserDim}</div></div>}
+                {sw.hasPump && sw.pump?.riserLength && <div className="kort-data-cell"><div className="k">Stigrør længde</div><div className="v">{sw.pump.riserLength} m</div></div>}
+                {sw.hasPump && sw.pump?.riserDepth && <div className="kort-data-cell"><div className="k">Pumpedybde</div><div className="v">{sw.pump.riserDepth} m</div></div>}
+                {sw.hasWellChamber && sw.wellChamber?.ringDia && <div className="kort-data-cell"><div className="k">Brønd Ø</div><div className="v">{sw.wellChamber.ringDia} mm</div></div>}
+                {sw.hasWellChamber && sw.wellChamber?.depth && <div className="kort-data-cell"><div className="k">Brønddybde</div><div className="v">{sw.wellChamber.depth} m</div></div>}
+              </div>
+
+              {sw.pump?.pumpImage && (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="section-label" style={{ marginBottom: 6 }}>Pumpefoto</div>
+                  <img src={sw.pump.pumpImage.dataUrl} alt="Pumpe" style={{ width: "100%", maxHeight: 140, objectFit: "cover", borderRadius: 8, border: "1px solid #a8c4de" }} />
+                </div>
+              )}
+
+              {(sw.wellImages || []).length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div className="section-label" style={{ marginBottom: 6 }}>Fotos</div>
+                  <div className="kort-img-row">
+                    {sw.wellImages.map(img => <img key={img.id} src={img.dataUrl} alt="" />)}
+                  </div>
+                </div>
+              )}
+
+              {wellTasks.length > 0 && (
+                <>
+                  <div className="section-label" style={{ marginBottom: 8 }}>Serviceopgaver ({wellTasks.length})</div>
+                  {wellTasks.map(t => (
+                    <div key={t.id} className="kort-task-item">
+                      <div className="kt-header">
+                        <span className="kt-tag">{taskLabel(t.type)}</span>
+                        <span className="kt-date">{fmtDate(t.date)}</span>
+                      </div>
+                      {t.techName && <div className="kt-notes">👤 {t.techName}</div>}
+                      {t.notes && <div className="kt-notes">{t.notes}</div>}
+                      {(t.images||[]).length > 0 && (
+                        <div className="kort-img-row">
+                          {t.images.map(img => <img key={img.id} src={img.dataUrl} alt="" />)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
+              {wellTasks.length === 0 && (
+                <div style={{ color: "var(--text2)", fontSize: 12, fontStyle: "italic" }}>Ingen registrerede serviceopgaver endnu.</div>
+              )}
+            </div>
+          </div>
+        )}
+        {!sw && (
+          <div style={{ background: "#fff", borderTop: "1px solid #a8c4de", padding: "12px 16px", fontSize: 12, color: "var(--text2)", textAlign: "center", fontFamily: "var(--font-head)", fontWeight: 600, letterSpacing: "0.04em" }}>
+            TAP EN MARKØR FOR AT SE FELTDATA
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ── Layout ──
-  const headerTitle = view === "editWell" ? "FELTDATA BORING" : view === "task" ? "Ny Opgave" : tab === "tasks" ? "Opgaver" : "Boringer";
+  const headerTitle = view === "editWell" ? "FELTDATA BORING" : view === "task" ? "Ny Opgave" : tab === "tasks" ? "Opgaver" : tab === "jupiter" ? "Jupiter" : tab === "kort" ? "Kort" : "Boringer";
 
   return (
     <>
@@ -1134,7 +1675,7 @@ function App() {
 
         {view === "wells" && (
           <div className="nav">
-            {[{ id: "new", icon: "⛏️", label: "Boringer" }, { id: "tasks", icon: "📋", label: "Opgaver" }].map(n => (
+            {[{ id: "new", icon: "⛏️", label: "Boringer" }, { id: "jupiter", icon: "🌍", label: "Jupiter" }, { id: "tasks", icon: "📋", label: "Opgaver" }, { id: "kort", icon: "🗺️", label: "Kort" }].map(n => (
               <button key={n.id} className={`nav-btn${tab === n.id ? " active" : ""}`} onClick={() => setTab(n.id)}>
                 <span>{n.icon}</span>{n.label}
               </button>
@@ -1143,7 +1684,9 @@ function App() {
         )}
 
         {view === "wells" && tab === "new" && renderWells()}
+        {view === "wells" && tab === "jupiter" && renderJupiter()}
         {view === "wells" && tab === "tasks" && renderTasks()}
+        {view === "wells" && tab === "kort" && renderKort()}
         {view === "editWell" && renderEditWell()}
         {view === "task" && renderTask()}
 
