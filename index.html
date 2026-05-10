@@ -1368,6 +1368,8 @@ function App() {
       if (!r.ok) throw new Error(d.error || `Proxy HTTP ${r.status}`);
       setJupiterDiag(null);
       setJupiterData({ ...d, dgu: raw });
+      // Also store field names for debug
+      if (d.boring?._allefelter) console.log("Jupiter felter:", d.boring._allefelter);
 
     } catch (e) {
       setJupiterError(e.message || "Ukendt fejl");
@@ -1393,10 +1395,7 @@ function App() {
   ) : null;
 
   const renderJupiter = () => {
-    const b = jupiterData?.boring || {};
-    const litho = jupiterData?.litho || [];
-    const vandstand = jupiterData?.vandstand || [];
-    const latestVand = vandstand.length ? [...vandstand].sort((a,b) => new Date(b.dato||b.date||0) - new Date(a.dato||a.date||0))[0] : null;
+    // data used inline in IIFE below
 
     return (
       <div className="jupiter-wrap">
@@ -1450,80 +1449,123 @@ function App() {
           </div>
         )}
 
-        {jupiterData && !jupiterLoading && (<>
-          <div className="jupiter-badge">
-            <span className="dot" />
-            DGU {jupiterData.dgu}
-          </div>
-
-          {/* Stamdata */}
-          <div className="section-label">Stamdata</div>
-          <div className="card">
-            <JRow k="DGU-nummer" v={b.dgUnr || b.dguNr || b.dgu_nr || jupiterData.dgu} />
-            <JRow k="Boring ID" v={b.boringsid || b.boringId} />
-            <JRow k="Boringens navn" v={b.boringsNavn || b.navn || b.name} />
-            <JRow k="Type" v={b.boringensFormaal || b.formaal || b.anlaegType || b.type} />
-            <JRow k="Status" v={b.boringsStatus || b.status} />
-            <JRow k="Slutdato" v={b.slutdato || b.slut_dato} />
-            <JRow k="Indberetningsdato" v={b.indberetningsDato || b.indberetningsdato} />
-          </div>
-
-          {/* Placering */}
-          <div className="section-label">Placering</div>
-          <div className="card">
-            <JRow k="Kommune" v={b.kommunenavn || b.kommune || b.municipalityName} />
-            <JRow k="Adresse" v={[b.vejnavn, b.husnr, b.postnr, b.postdistrikt].filter(Boolean).join(" ")} />
-            <JRow k="UTM X (E)" v={b.utmx || b.xkoordinat || b.x} />
-            <JRow k="UTM Y (N)" v={b.utmy || b.ykoordinat || b.y} />
-            <JRow k="Koordinatmetode" v={b.koordinatMetode || b.koord_metode} />
-            <JRow k="Terrænkote (m.o.h.)" v={b.koteSaet || b.kote || b.terraenkote} />
-          </div>
-
-          {/* Tekniske data */}
-          <div className="section-label">Tekniske data</div>
-          <div className="card">
-            <JRow k="Boringstype" v={b.boremetode || b.borings_metode || b.drillMethod} />
-            <JRow k="Totaldybde (m)" v={b.boringsDybde || b.totalDybde || b.dybde} />
-            <JRow k="Forerørsdybde (m)" v={b.forerørsDybde || b.forerorDybde} />
-            <JRow k="Forerør materiale" v={b.forerørsMateriale || b.forerorMateriale} />
-            <JRow k="Forerør indre Ø (mm)" v={b.forerørsIndreDiameter || b.indreDiameter} />
-            <JRow k="Filterrør fra (m)" v={b.filterrorFra || b.filterFra} />
-            <JRow k="Filterrør til (m)" v={b.filterrorTil || b.filterTil} />
-            <JRow k="Filtertype" v={b.filterType || b.filterrorType} />
-          </div>
-
-          {/* Vandstand */}
-          {latestVand && (<>
-            <div className="section-label">Seneste vandstand</div>
-            <div className="card">
-              <JRow k="Dato" v={latestVand.dato || latestVand.date || latestVand.maaledato} />
-              <JRow k="Vandspejl (m u.t.)" v={latestVand.vandspejl || latestVand.pejling || latestVand.niveau} />
-              <JRow k="Vandkote (m.o.h.)" v={latestVand.vandkote || latestVand.kote} />
-              <JRow k="Måler" v={latestVand.maalerNavn || latestVand.operatoer} />
-            </div>
-          </>)}
-
-          {/* Litologi */}
-          {litho.length > 0 && (<>
-            <div className="section-label">Litologi ({litho.length} lag)</div>
-            <div className="card" style={{ padding:"8px 12px" }}>
-              <div className="jupiter-lithology">
-                {litho.slice(0,30).map((l, i) => (
-                  <div key={i} className="lith-row">
-                    <div className="lith-depth">{l.fraM ?? l.fra_m ?? l.dybdeFra ?? "?"} – {l.tilM ?? l.til_m ?? l.dybdeTil ?? "?"} m</div>
-                    <div className="lith-desc">{l.litologiTekst || l.lithology || l.beskrivelse || l.tekst || "–"}</div>
-                    <div className="lith-color" style={{ background: lithoColor(l.litologiTekst || l.lithology || l.beskrivelse) }} />
-                  </div>
-                ))}
-                {litho.length > 30 && <div style={{ padding:"6px 10px", fontSize:11, color:"var(--text2)", fontStyle:"italic" }}>+ {litho.length-30} yderligere lag…</div>}
+        {jupiterData && !jupiterLoading && (() => {
+          const b = jupiterData.boring || {};
+          const anlaeg = jupiterData.anlaeg || [];
+          const litho = jupiterData.litho || [];
+          const meta = jupiterData._meta || {};
+          return (<>
+            {/* Header badge + PDF knap */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:8 }}>
+              <div className="jupiter-badge" style={{ marginBottom:0 }}>
+                <span className="dot" />
+                DGU {jupiterData.dgu}
               </div>
+              {b.pdfUrl && (
+                <a href={b.pdfUrl} target="_blank" rel="noopener"
+                  style={{ display:"flex", alignItems:"center", gap:6, background:"var(--blue)", color:"#fff",
+                    padding:"6px 14px", borderRadius:7, fontFamily:"var(--font-head)", fontWeight:700,
+                    fontSize:11, textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase",
+                    flexShrink:0 }}>
+                  📄 PDF-rapport
+                </a>
+              )}
             </div>
-          </>)}
 
-          <div style={{ textAlign:"center", fontSize:10, color:"var(--text2)", marginTop:8 }}>
-            Data fra GEUS Jupiter – <a href={`https://data.geus.dk/JupiterWWW/#dguNr=${jupiterData.dgu}`} target="_blank" rel="noopener" style={{ color:"var(--blue)" }}>Åbn i Jupiter online</a>
-          </div>
-        </>)}
+            {/* Stamdata */}
+            <div className="section-label">Stamdata</div>
+            <div className="card">
+              <JRow k="DGU-nummer"        v={b.dguNr} />
+              <JRow k="Boring ID"         v={b.boringsid} />
+              <JRow k="Boringens navn"    v={b.navn} />
+              <JRow k="Formål / type"     v={b.formaal} />
+              <JRow k="Status"            v={b.status} />
+              <JRow k="Boremetode"        v={b.boremetode} />
+              <JRow k="Slutdato"          v={b.slutdato} />
+              <JRow k="Indberettet"       v={b.indberetningsdato} />
+            </div>
+
+            {/* Placering */}
+            <div className="section-label">Placering</div>
+            <div className="card">
+              <JRow k="Kommune"           v={b.kommune} />
+              <JRow k="Adresse"           v={[b.vejnavn, b.husnr, b.postnr, b.postdistrikt].filter(Boolean).join(" ") || null} />
+              <JRow k="UTM X (E)"         v={b.utmx != null ? Math.round(b.utmx) : null} />
+              <JRow k="UTM Y (N)"         v={b.utmy != null ? Math.round(b.utmy) : null} />
+              <JRow k="Terrænkote (m.o.h.)" v={b.kote} />
+            </div>
+
+            {/* Tekniske data */}
+            <div className="section-label">Tekniske data</div>
+            <div className="card">
+              <JRow k="Totaldybde (m)"    v={b.dybde} />
+              <JRow k="Forerørsdybde (m)" v={b.forerorDybde} />
+              <JRow k="Forerør materiale" v={b.forerorMateriale} />
+              <JRow k="Forerør Ø (mm)"    v={b.forerorDiameter} />
+              <JRow k="Filter fra (m)"    v={b.filterFra} />
+              <JRow k="Filter til (m)"    v={b.filterTil} />
+              <JRow k="Grundvandsmagasin" v={b.grundvandsmagasin} />
+              <JRow k="Vandstand (m u.t.)" v={b.vandstand} />
+            </div>
+
+            {/* Anlæg / indvindingsanlæg */}
+            {anlaeg.length > 0 && (<>
+              <div className="section-label">Anlæg / indvinding ({anlaeg.length})</div>
+              {anlaeg.map((a, i) => (
+                <div key={i} className="card" style={{ marginBottom:8 }}>
+                  <JRow k="Anlæg ID"    v={a.anlaegId} />
+                  <JRow k="Type"        v={a.type} />
+                  <JRow k="Navn"        v={a.navn} />
+                  <JRow k="Kapacitet"   v={a.kapacitet} />
+                  <JRow k="Dybde (m)"   v={a.dybde} />
+                  <JRow k="Status"      v={a.status} />
+                </div>
+              ))}
+            </>)}
+
+            {/* Litologi / cyklogram */}
+            {litho.length > 0 && (<>
+              <div className="section-label">Litologi – {litho.length} lag</div>
+              <div className="card" style={{ padding:"8px 12px" }}>
+                <div className="jupiter-lithology">
+                  {litho.map((l, i) => (
+                    <div key={i} className="lith-row">
+                      <div className="lith-depth">{l.fraM ?? "?"} – {l.tilM ?? "?"} m</div>
+                      <div className="lith-desc">{l.tekst || l.symbol || "–"}</div>
+                      <div className="lith-color" style={{ background: lithoColor(l.tekst) }} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>)}
+
+            {/* Links */}
+            <div style={{ display:"flex", gap:8, marginTop:8, flexWrap:"wrap" }}>
+              <a href={`https://data.geus.dk/JupiterWWW/#dguNr=${jupiterData.dgu}`}
+                target="_blank" rel="noopener"
+                style={{ flex:1, textAlign:"center", background:"var(--blue3)", border:"1px solid var(--blue4)",
+                  borderRadius:7, padding:"8px 12px", fontFamily:"var(--font-head)", fontWeight:700,
+                  fontSize:11, color:"var(--blue)", textDecoration:"none", letterSpacing:"0.05em" }}>
+                🌍 Åbn i Jupiter Online
+              </a>
+              {b.pdfUrl && (
+                <a href={b.pdfUrl} target="_blank" rel="noopener"
+                  style={{ flex:1, textAlign:"center", background:"var(--blue)", borderRadius:7,
+                    padding:"8px 12px", fontFamily:"var(--font-head)", fontWeight:700,
+                    fontSize:11, color:"#fff", textDecoration:"none", letterSpacing:"0.05em" }}>
+                  📄 Download PDF-rapport
+                </a>
+              )}
+            </div>
+
+            {/* Debug: vis feltnavne hvis ingen data */}
+            {meta.lithoCount === 0 && meta.anlaegCount === 0 && (
+              <div style={{ marginTop:12, fontSize:10, color:"var(--text2)", fontStyle:"italic", textAlign:"center" }}>
+                Kun basisdata fra WFS-lag jupiter_boringer_ws. Litologi og anlægsdata ikke tilgængeligt for denne boring.
+              </div>
+            )}
+          </>);
+        })()}
       </div>
     );
   };
