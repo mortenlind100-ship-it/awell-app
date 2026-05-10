@@ -1,44 +1,30 @@
-// Vercel proxy — GEUS Jupiter WFS + dokumenter
 module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const dgu   = (req.query.dgu  || "").trim();
-  const debug = req.query.debug === "1";
-  if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX" });
-
   const WFS  = "https://data.geus.dk/geusmap/ows/25832.jsp";
-  const hdrs = { Accept: "*/*", "User-Agent": "Awell/1.0" };
-  const sig  = AbortSignal.timeout(12000);
+  const hdrs = { Accept: "*/*", "User-Agent": "Mozilla/5.0 Awell/1.0" };
 
-  // ── Helper ──────────────────────────────────────────────────────────────────
-  const getWFS = async (typeName, cqlFilter) => {
-    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature`
-      + `&typeName=${typeName}&outputFormat=application/json`
-      + `&maxFeatures=200&CQL_FILTER=${encodeURIComponent(cqlFilter)}`;
-    try {
-      const r = await fetch(url, { headers: hdrs, signal: sig });
-      const t = await r.text();
-      if (!r.ok || t.includes("ExceptionReport") || t.includes("<!doctype")) return null;
-      const j = JSON.parse(t);
-      return j.features || [];
-    } catch(e) { return null; }
-  };
-
-  // ── DescribeFeatureType helper (for debug) ──────────────────────────────────
+  // ?desc=1&layer=XXX  — DescribeFeatureType (shows all field names)
   if (req.query.desc) {
     const layer = req.query.layer || "jupiter_boringer_ws";
-    const r = await fetch(
-      `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=DescribeFeatureType&typeName=${layer}`,
-      { headers: hdrs }
-    );
+    const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=DescribeFeatureType&typeName=${layer}`, { headers: hdrs });
     const t = await r.text();
     res.setHeader("Content-Type", "text/xml");
     return res.status(r.status).send(t);
   }
 
-  // ── GetCapabilities (for debug) ─────────────────────────────────────────────
+  // ?sample=1&layer=XXX  — fetch 1 raw feature (no filter) to see field names + values
+  if (req.query.sample) {
+    const layer = req.query.layer || "jupiter_boringer_ws";
+    const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${layer}&maxFeatures=1&outputFormat=application/json`, { headers: hdrs });
+    const t = await r.text();
+    res.setHeader("Content-Type", "application/json");
+    return res.status(r.status).send(t);
+  }
+
+  // ?caps=1  — GetCapabilities
   if (req.query.caps) {
     const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities`, { headers: hdrs });
     const t = await r.text();
@@ -46,140 +32,98 @@ module.exports = async (req, res) => {
     return res.status(r.status).send(t);
   }
 
-  // ── Try multiple DGU field name variants ────────────────────────────────────
-  const dguNoDot = dgu.replace(/\./g, "");
-  const filters = [
-    `dgu_nr='${dgu}'`, `dgunr='${dgu}'`, `dgu_nr='${dguNoDot}'`,
-    `DGU_NR='${dgu}'`, `dgu_nr LIKE '${dgu}'`,
+  const dgu = (req.query.dgu || "").trim();
+  if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX — eller brug ?sample=1 for at se feltnavne" });
+
+  const dguNoDot  = dgu.replace(/\./g, "");
+  const dguSlash  = dgu.replace(".", "/");
+
+  // Try every conceivable filter combination
+  const candidates = [
+    // Standard field name variants
+    `dgu_nr='${dgu}'`,
+    `dgu_nr='${dguNoDot}'`,
+    `dgunr='${dgu}'`,
+    `dgunr='${dguNoDot}'`,
+    `DGU_NR='${dgu}'`,
+    `DGU_NR='${dguNoDot}'`,
+    `dgu='${dgu}'`,
+    `dgu='${dguNoDot}'`,
+    // LIKE operator
+    `dgu_nr LIKE '${dgu}'`,
+    `dgu_nr LIKE '%${dgu}%'`,
+    `dgu_nr LIKE '%${dguNoDot}%'`,
+    // strConcat format variants (area.number)
+    `dgu_nr='182218'`,
+    `dgu_nr='182%2E218'`,
   ];
 
-  let boringFeatures = null;
-  let usedFilter = null;
-  for (const f of filters) {
-    const r = await getWFS("jupiter_boringer_ws", f);
-    if (r && r.length > 0) { boringFeatures = r; usedFilter = f; break; }
-  }
-  if (!boringFeatures) {
-    return res.status(404).json({ error: `Ingen boring fundet for DGU ${dgu}` });
-  }
+  const attempts = [];
+  let found = null;
 
-  const bf   = boringFeatures[0];
-  const bp   = bf.properties;
-  const geom = bf.geometry;
-
-  // Get the internal boring ID for sub-queries
-  const boringsid = bp.boringsid || bp.BORINGSID || bp.boring_id || bp.id;
-
-  // ── Fetch anlaeg (facilities/intakes) ───────────────────────────────────────
-  let anlaegFeatures = [];
-  if (boringsid) {
-    const af = await getWFS("jupiter_anlaeg_ws", `boringsid=${boringsid}`);
-    if (af) anlaegFeatures = af;
-  }
-  // fallback: search by DGU
-  if (!anlaegFeatures.length) {
-    for (const f of filters.slice(0, 2)) {
-      const af = await getWFS("jupiter_anlaeg_ws", f);
-      if (af && af.length) { anlaegFeatures = af; break; }
-    }
-  }
-
-  // ── Fetch cyklogram (lithology log) ─────────────────────────────────────────
-  let cykloFeatures = [];
-  if (boringsid) {
-    const cf = await getWFS("jupiter_bor_cyklogram", `boringsid=${boringsid}`);
-    if (cf) cykloFeatures = cf;
-  }
-  if (!cykloFeatures.length) {
-    for (const f of filters.slice(0, 2)) {
-      const cf = await getWFS("jupiter_bor_cyklogram", f);
-      if (cf && cf.length) { cykloFeatures = cf; break; }
-    }
-  }
-
-  // ── Check for PDF document ───────────────────────────────────────────────────
-  // Jupiter stores borehole reports as PDFs - try known URL patterns
-  const dguSlash = dgu.replace(".", "/");
-  const pdfCandidates = [
-    `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dgu}.pdf`,
-    `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dguNoDot}.pdf`,
-    `https://data.geus.dk/boredokument/${dguNoDot}.pdf`,
-    `https://data.geus.dk/boredokument/${dgu}.pdf`,
-    bp.dokument_url || bp.pdf_url || bp.rapport_url || null,
-    bp.doklink || bp.dok_link || null,
-  ].filter(Boolean);
-
-  let pdfUrl = null;
-  for (const u of pdfCandidates) {
+  for (const filter of candidates) {
+    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&outputFormat=application/json&CQL_FILTER=${encodeURIComponent(filter)}`;
     try {
-      const r = await fetch(u, { method: "HEAD", headers: hdrs, signal: AbortSignal.timeout(5000) });
-      if (r.ok && (r.headers.get("content-type") || "").includes("pdf")) {
-        pdfUrl = u; break;
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+      const text = await r.text();
+      const preview = text.slice(0, 200).replace(/\s+/g, " ");
+      attempts.push({ filter, status: r.status, preview });
+
+      if (r.ok && text.includes('"features"') && !text.includes("ExceptionReport")) {
+        const j = JSON.parse(text);
+        if (j.features && j.features.length > 0) {
+          found = j.features[0];
+          break;
+        }
       }
-    } catch(_) {}
+    } catch(e) {
+      attempts.push({ filter, error: e.message });
+    }
   }
 
-  // ── Normalise boring properties ─────────────────────────────────────────────
-  const v = (p, ...keys) => { for (const k of keys) { const val = p[k] || p[k.toUpperCase()] || p[k.toLowerCase()]; if (val != null && val !== "") return val; } return null; };
+  if (!found) {
+    // Return all attempts so we can see what GEUS actually returned
+    return res.status(404).json({
+      error: `Ingen boring fundet for DGU ${dgu}`,
+      tip: "Kald /api/jupiter?sample=1 for at se et råeksempel med korrekte feltnavne",
+      tip2: "Kald /api/jupiter?desc=1 for DescribeFeatureType",
+      attempts,
+    });
+  }
 
-  const boring = {
-    dguNr:             v(bp, "dgu_nr","dgunr","DGU_NR")              || dgu,
-    boringsid:         v(bp, "boringsid","boring_id","BORINGSID"),
-    navn:              v(bp, "boring_navn","navn","borings_navn","BORING_NAVN"),
-    formaal:           v(bp, "formaal","FORMAAL","anlaeg_type","anvendelse"),
-    status:            v(bp, "status","STATUS","borings_status"),
-    boremetode:        v(bp, "boremetode","BOREMETODE","boemetode"),
-    slutdato:          v(bp, "slutdato","SLUTDATO","afsluttet"),
-    indberetningsdato: v(bp, "indberetningsdato","INDBERETNINGSDATO"),
-    kommune:           v(bp, "kommunenavn","KOMMUNENAVN","kommune_navn","kommune"),
-    vejnavn:           v(bp, "vejnavn","VEJNAVN"),
-    husnr:             v(bp, "husnr","HUSNR"),
-    postnr:            v(bp, "postnr","POSTNR"),
-    postdistrikt:      v(bp, "postdistrikt","POSTDISTRIKT"),
-    utmx:              geom?.coordinates?.[0],
-    utmy:              geom?.coordinates?.[1],
-    kote:              v(bp, "kote","KOTE","terraenkote","TERRAENKOTE","kote_saet"),
-    dybde:             v(bp, "dybde","DYBDE","boringsdybde","BORINGSDYBDE","totaldybde"),
-    forerorDybde:      v(bp, "foreror_dybde","foreroer_dybde","casing_dybde"),
-    forerorMateriale:  v(bp, "foreror_materiale","foreroer_materiale","casing_materiale"),
-    forerorDiameter:   v(bp, "foreror_diameter","foreroer_diameter","indre_diameter"),
-    filterFra:         v(bp, "filter_fra","filterfra","screen_fra"),
-    filterTil:         v(bp, "filter_til","filtertil","screen_til"),
-    grundvandsmagasin: v(bp, "grundvandsmagasin","magasin","MAGASIN"),
-    vandstand:         v(bp, "vandstand","VANDSTAND","ro_vandstand"),
-    pdfUrl,
-    _allefelter:       debug ? Object.keys(bp).sort() : undefined,
-    _allevaerdier:     debug ? bp : undefined,
-  };
+  const p    = found.properties;
+  const geom = found.geometry;
 
-  // ── Normalise anlaeg ────────────────────────────────────────────────────────
-  const anlaeg = anlaegFeatures.map(f => {
-    const p = f.properties;
-    return {
-      anlaegId:   v(p, "anlaegid","anlaeg_id","id"),
-      type:       v(p, "anlaeg_type","type","TYPE","anvendelse"),
-      navn:       v(p, "anlaeg_navn","navn","NAME"),
-      kapacitet:  v(p, "kapacitet","ydelse","KAPACITET"),
-      dybde:      v(p, "dybde","DYBDE","intake_dybde"),
-      status:     v(p, "status","STATUS"),
-      _debug:     debug ? p : undefined,
-    };
-  });
-
-  // ── Normalise cyklogram / lithology ────────────────────────────────────────
-  const litho = cykloFeatures.map(f => {
-    const p = f.properties;
-    return {
-      fraM:       v(p, "fra_m","FRA_M","fra","depth_from","dybde_fra"),
-      tilM:       v(p, "til_m","TIL_M","til","depth_to","dybde_til"),
-      tekst:      v(p, "litologi_tekst","tekst","TEKST","lith_tekst","beskrivelse","lithology"),
-      symbol:     v(p, "symbol","SYMBOL","lith_symbol"),
-      farve:      v(p, "farve","FARVE","color"),
-      _debug:     debug ? p : undefined,
-    };
-  }).sort((a, b) => (parseFloat(a.fraM)||0) - (parseFloat(b.fraM)||0));
-
-  return res.status(200).json({ boring, anlaeg, litho, vandstand: [], dgu,
-    _meta: { usedFilter, boringCount: boringFeatures.length, anlaegCount: anlaeg.length, lithoCount: litho.length, pdfUrl }
+  // Return both normalised AND raw so we can see field names
+  return res.status(200).json({
+    boring: {
+      dguNr:      p.dgu_nr || p.dgunr || p.DGU_NR || dgu,
+      boringsid:  p.boringsid || p.BORINGSID,
+      navn:       p.boring_navn || p.navn || p.BORING_NAVN,
+      formaal:    p.formaal || p.FORMAAL,
+      status:     p.status || p.STATUS,
+      boremetode: p.boremetode || p.BOREMETODE,
+      slutdato:   p.slutdato || p.SLUTDATO,
+      kommune:    p.kommunenavn || p.KOMMUNENAVN || p.kommune,
+      vejnavn:    p.vejnavn || p.VEJNAVN,
+      husnr:      p.husnr || p.HUSNR,
+      postnr:     p.postnr || p.POSTNR,
+      utmx:       geom?.coordinates?.[0],
+      utmy:       geom?.coordinates?.[1],
+      kote:       p.kote || p.KOTE || p.terraenkote,
+      dybde:      p.dybde || p.DYBDE || p.boringsdybde || p.totaldybde,
+      forerorDybde:     p.foreror_dybde || p.foreror_laengde,
+      forerorMateriale: p.foreror_mat || p.foreror_materiale,
+      forerorDiameter:  p.foreror_indre_diam || p.foreror_diameter,
+      filterFra:  p.filter_fra || p.filterfra,
+      filterTil:  p.filter_til || p.filtertil,
+      grundvandsmagasin: p.grundvandsmagasin || p.magasin,
+      vandstand:  p.vandstand || p.ro_vandstand,
+      pdfUrl:     p.doklink || p.pdf_url || p.rapport_url || null,
+      _rawFields: Object.keys(p).sort(),   // ← shows exact field names from WFS
+      _rawValues: p,                        // ← shows all raw values
+    },
+    anlaeg: [], litho: [], vandstand: [], dgu,
+    _foundWithFilter: filter,
   });
 };
