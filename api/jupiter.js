@@ -6,34 +6,20 @@ module.exports = async (req, res) => {
   const WFS  = "https://data.geus.dk/geusmap/ows/25832.jsp";
   const hdrs = { Accept: "*/*", "User-Agent": "Mozilla/5.0 Awell/1.0" };
 
-  if (req.query.caps)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities`, {headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
-  if (req.query.desc)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=DescribeFeatureType&typeName=${req.query.layer||"jupiter_boringer_ws"}`, {headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
-  if (req.query.sample) { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${req.query.layer||"jupiter_boringer_ws"}&maxFeatures=1`, {headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
+  if (req.query.caps)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
+  if (req.query.desc)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=DescribeFeatureType&typeName=${req.query.layer||"jupiter_boringer_ws"}`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
+  if (req.query.sample) { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${req.query.layer||"jupiter_boringer_ws"}&maxFeatures=1`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
 
   const dgu = (req.query.dgu || "").trim();
   if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX" });
 
-  // Helper: fetch GML from WFS
-  const fetchGML = async (typeName, filter) => {
-    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=200&CQL_FILTER=${encodeURIComponent(filter)}`;
-    try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
-      const t = await r.text();
-      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status")) return null;
-      if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
-      if (!t.includes("featureMember")) return null;
-      return t;
-    } catch(e) { return null; }
-  };
-
-  // Helper: extract tag value from GML (strips ms: namespace)
+  // Helper: extract ms: field value from GML
   const g = (xml, tag) => {
-    const re = new RegExp(`<ms:${tag}[^>]*>([^<]*)<\/ms:${tag}>`, "i");
-    const m  = xml.match(re);
+    const m = xml.match(new RegExp(`<ms:${tag}[^>]*>([^<]*)<\\/ms:${tag}>`, "i"));
     return m ? m[1].trim() || null : null;
   };
 
-  // Helper: extract all ms: fields as object
+  // Helper: all ms: fields
   const allFields = (xml) => {
     const out = {};
     const re = /<ms:([a-zA-Z0-9_]+)[^>]*>([^<]*)<\/ms:/g;
@@ -42,22 +28,80 @@ module.exports = async (req, res) => {
     return out;
   };
 
-  // Helper: extract GML coordinates
+  // Helper: GML coordinates
   const coords = (xml) => {
-    const m = xml.match(/<gml:coordinates[^>]*>([\d., ]+)<\/gml:coordinates>/);
+    const m = xml.match(/<gml:coordinates[^>]*>([\d.,-]+)<\/gml:coordinates>/);
     if (!m) return [null, null];
-    const parts = m[1].split(",");
-    return [parseFloat(parts[0]), parseFloat(parts[1])];
+    const p = m[1].split(",");
+    return [parseFloat(p[0]), parseFloat(p[1])];
   };
 
-  // ── Step 1: Fetch boring using exact field name "dgunr" ─────────────────────
-  // From sample we know: <ms:dgunr>146.3602</ms:dgunr>
-  // DGU format in WFS uses dot notation: "182.218"
-  const boringGML = await fetchGML("jupiter_boringer_ws", `dgunr='${dgu}'`);
+  // Helper: fetch GML with OGC XML filter (more reliable than CQL for exact match)
+  const fetchWithXMLFilter = async (typeName, fieldName, value) => {
+    const filter = `<ogc:Filter xmlns:ogc="http://www.opengis.net/ogc"><ogc:PropertyIsEqualTo matchCase="false"><ogc:PropertyName>${fieldName}</ogc:PropertyName><ogc:Literal>${value}</ogc:Literal></ogc:PropertyIsEqualTo></ogc:Filter>`;
+    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=5&FILTER=${encodeURIComponent(filter)}`;
+    try {
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
+      const t = await r.text();
+      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status") || !t.includes("featureMember")) return null;
+      if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
+      return t;
+    } catch(e) { return null; }
+  };
+
+  // Helper: fetch GML with CQL (fallback)
+  const fetchWithCQL = async (typeName, cql) => {
+    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=5&CQL_FILTER=${encodeURIComponent(cql)}`;
+    try {
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
+      const t = await r.text();
+      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status") || !t.includes("featureMember")) return null;
+      if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
+      return t;
+    } catch(e) { return null; }
+  };
+
+  // ── Find boring ─────────────────────────────────────────────────────────────
+  // From GML sample field is <ms:dgunr> — try XML PropertyIsEqualTo first (exact match)
+  // Also try dgunr_org which has format "146. 3602" (with space)
+  let boringGML = null;
+  const attempts = [];
+
+  // Try 1: XML filter exact match on dgunr
+  boringGML = await fetchWithXMLFilter("jupiter_boringer_ws", "dgunr", dgu);
+  attempts.push({ method: "XML filter dgunr", found: !!boringGML });
+
+  // Try 2: CQL exact match
   if (!boringGML) {
+    boringGML = await fetchWithCQL("jupiter_boringer_ws", `dgunr = '${dgu}'`);
+    attempts.push({ method: "CQL dgunr =", found: !!boringGML });
+  }
+
+  // Try 3: txt_search starts with DGU number (format: "182.218 Vandforsyning...")
+  if (!boringGML) {
+    boringGML = await fetchWithCQL("jupiter_boringer_ws", `txt_search LIKE '${dgu} %'`);
+    attempts.push({ method: "CQL txt_search LIKE", found: !!boringGML });
+  }
+
+  // Try 4: dgunr_org field (has space: "182. 218")
+  if (!boringGML) {
+    const dguWithSpace = dgu.replace(".", ". ");
+    boringGML = await fetchWithCQL("jupiter_boringer_ws", `dgunr_org LIKE '${dguWithSpace}%'`);
+    attempts.push({ method: "CQL dgunr_org with space", found: !!boringGML });
+  }
+
+  if (!boringGML) {
+    return res.status(404).json({ error: `Ingen boring fundet for DGU ${dgu}`, attempts });
+  }
+
+  // Verify the returned dgunr matches what we asked for (guard against partial matches)
+  const returnedDgu = g(boringGML, "dgunr") || "";
+  if (returnedDgu && returnedDgu !== dgu) {
+    // Try next feature in collection or report mismatch
     return res.status(404).json({
-      error: `Ingen boring fundet for DGU ${dgu}`,
-      tip: "Tjek at DGU-nummeret har korrekt format, f.eks. 182.218"
+      error: `WFS returnerede DGU ${returnedDgu} for søgning på ${dgu} — prøv et andet filter`,
+      attempts,
+      returnedDgu,
     });
   }
 
@@ -65,30 +109,30 @@ module.exports = async (req, res) => {
   const [utmx, utmy] = coords(boringGML);
   const borid = bf.borid || bf.id;
 
-  // ── Step 2: Fetch cyklogram (litologi) via borid ─────────────────────────────
-  // From sample: <ms:cyklogram>https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=612324</ms:cyklogram>
+  // ── Fetch litologi via cyklogram URL ────────────────────────────────────────
   let litho = [];
   const cykloUrl = bf.cyklogram;
+
   if (cykloUrl) {
     try {
-      const cr = await fetch(cykloUrl, { headers: hdrs, signal: AbortSignal.timeout(8000) });
-      const ct = await cr.text();
-      // Cyklogram returns HTML or GML - try to extract litologi layers
+      const cr  = await fetch(cykloUrl, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+      const ct  = await cr.text();
+
       if (ct.includes("featureMember")) {
-        // It's GML - parse layers
+        // GML response
         const layerRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
         let lm;
         while ((lm = layerRe.exec(ct)) !== null) {
           const lf = allFields(lm[1]);
           litho.push({
-            fraM:  lf.fra_m || lf.fra || lf.dybde_fra || lf.depth_from,
-            tilM:  lf.til_m || lf.til || lf.dybde_til || lf.depth_to,
-            tekst: lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.lithology || lf.symbol_tekst,
+            fraM:   lf.fra_m  || lf.fra  || lf.dybde_fra || lf.depth_from,
+            tilM:   lf.til_m  || lf.til  || lf.dybde_til || lf.depth_to,
+            tekst:  lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.symbol_tekst || lf.lithology,
             symbol: lf.symbol || lf.lith_symbol,
           });
         }
       } else if (ct.includes("<tr") || ct.includes("<td")) {
-        // HTML table - extract rows
+        // HTML table
         const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
         let rm;
         while ((rm = rowRe.exec(ct)) !== null) {
@@ -104,13 +148,14 @@ module.exports = async (req, res) => {
     } catch(_) {}
   }
 
-  // Also try WFS layer jupiter_bor_cyklogram with borid
+  // Fallback: WFS layer jupiter_bor_cyklogram
   if (litho.length === 0 && borid) {
-    const cykloGML = await fetchGML("jupiter_bor_cyklogram", `borid=${borid}`);
-    if (cykloGML) {
+    const cykGML = await fetchWithXMLFilter("jupiter_bor_cyklogram", "borid", borid)
+                || await fetchWithCQL("jupiter_bor_cyklogram", `borid=${borid}`);
+    if (cykGML) {
       const layerRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
       let lm;
-      while ((lm = layerRe.exec(cykloGML)) !== null) {
+      while ((lm = layerRe.exec(cykGML)) !== null) {
         const lf = allFields(lm[1]);
         litho.push({
           fraM:  lf.fra_m || lf.fra,
@@ -122,61 +167,53 @@ module.exports = async (req, res) => {
     }
   }
 
-  // Sort litho by depth
   litho = litho
     .filter(l => l.fraM != null || l.tekst)
-    .sort((a,b) => (parseFloat(a.fraM)||0) - (parseFloat(b.fraM)||0));
+    .sort((a, b) => (parseFloat(a.fraM) || 0) - (parseFloat(b.fraM) || 0));
 
-  // ── Step 3: Check for PDF borerapport ────────────────────────────────────────
-  // From sample: <ms:url>https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=612324</ms:url>
-  // This is an HTML page - check if a PDF version exists
-  const boreholeUrl = bf.url; // e.g. https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=XXX
-  let pdfUrl = null;
+  // ── Check for PDF ────────────────────────────────────────────────────────────
   const dguNoDot = dgu.replace(/\./g, "");
-
+  let pdfUrl = null;
   const pdfCandidates = [
     borid ? `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${borid}.pdf` : null,
     `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dguNoDot}.pdf`,
     `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dgu}.pdf`,
-    borid ? `https://data.geus.dk/boredokument/${borid}.pdf` : null,
   ].filter(Boolean);
 
   for (const u of pdfCandidates) {
     try {
-      const r = await fetch(u, { method: "HEAD", headers: hdrs, signal: AbortSignal.timeout(4000) });
+      const r  = await fetch(u, { method: "HEAD", headers: hdrs, signal: AbortSignal.timeout(4000) });
       const ct = r.headers.get("content-type") || "";
       if (r.ok && ct.toLowerCase().includes("pdf")) { pdfUrl = u; break; }
     } catch(_) {}
   }
 
-  // ── Response ─────────────────────────────────────────────────────────────────
   return res.status(200).json({
     boring: {
-      dguNr:        bf.dgunr          || dgu,
-      boringsid:    bf.borid          || bf.id,
-      navn:         bf.anlaegsnavn    || bf.boringsby || null,
-      formaal:      bf.formaal_tekst  || bf.formaal,
-      anvendelse:   bf.anvendelse_tekst || bf.anvendelse,
-      status:       bf.kode_tekst     || bf.kode,
-      boremetode:   bf.broendborer    || null,
-      dato:         bf.dato           || bf.aar,
-      kommune:      bf.kommunenavn,
-      region:       bf.region_tekst   || bf.region,
-      adresse:      bf.sted1          || null,
-      postnr:       bf.postnr,
-      utmx:         utmx              || bf.xutm,
-      utmy:         utmy              || bf.yutm,
-      kote:         bf.terraen_kote,
-      dybde:        bf.dybde_num      || bf.dybde,
-      dataejer:     bf.dataejer,
+      dguNr:       bf.dgunr          || dgu,
+      boringsid:   borid,
+      formaal:     bf.formaal_tekst  || bf.formaal,
+      anvendelse:  bf.anvendelse_tekst || bf.anvendelse,
+      status:      bf.kode_tekst     || bf.kode,
+      boremetode:  bf.broendborer,
+      dato:        bf.dato           || bf.aar,
+      kommune:     bf.kommunenavn,
+      region:      bf.region_tekst,
+      adresse:     bf.sted1,
+      postnr:      bf.postnr,
+      utmx:        utmx              || bf.xutm,
+      utmy:        utmy              || bf.yutm,
+      kote:        bf.terraen_kote,
+      dybde:       bf.dybde_num      || bf.dybde,
+      dataejer:    bf.dataejer,
       pdfUrl,
-      boreholeUrl,  // HTML borerapport side
-      cykloUrl:     bf.cyklogram,
+      boreholeUrl: bf.url,
+      cykloUrl,
     },
     litho,
     anlaeg: [],
     vandstand: [],
     dgu,
-    _meta: { borid, pdfUrl, boreholeUrl, lithoCount: litho.length },
+    _meta: { borid, pdfUrl, lithoCount: litho.length, attempts },
   });
 };
