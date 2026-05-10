@@ -786,6 +786,7 @@ function App() {
   const [toast, setToast] = useState(null);
   const [selectedMapWell, setSelectedMapWell] = useState(null);
   const [jupiterDgu, setJupiterDgu] = useState("182.218");
+  const [jupiterDiag, setJupiterDiag] = useState(null);
   const [jupiterData, setJupiterData] = useState(null);
   const [jupiterLoading, setJupiterLoading] = useState(false);
   const [jupiterError, setJupiterError] = useState(null);
@@ -1363,7 +1364,9 @@ function App() {
         throw new Error(`Proxy svarede HTTP ${r.status} med: ${text.slice(0, 200)}`);
       }
 
+      if (d.attempts) setJupiterDiag(d.attempts);
       if (!r.ok) throw new Error(d.error || `Proxy HTTP ${r.status}`);
+      setJupiterDiag(null);
       setJupiterData({ ...d, dgu: raw });
 
     } catch (e) {
@@ -1433,7 +1436,17 @@ function App() {
 
         {jupiterError && (
           <div className="jupiter-error">
-            <div>⚠️ {jupiterError}</div>
+            <div style={{ marginBottom: 6 }}>⚠️ {jupiterError}</div>
+            {jupiterDiag && (
+              <div style={{ fontSize: 10, fontFamily: "monospace", marginTop: 8,
+                background: "#fff8f8", padding: 8, borderRadius: 4,
+                overflowX: "auto", lineHeight: 1.6, color: "#666" }}>
+                <strong>Diagnosekald:</strong><br/>
+                {jupiterDiag.map((a, i) => (
+                  <div key={i}>{a.status || "ERR"} {a.url?.split("/api/v1")[1] || a.url} {a.body ? `→ ${a.body.slice(0,60)}` : a.error || ""}</div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
