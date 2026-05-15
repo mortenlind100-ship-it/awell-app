@@ -41,72 +41,63 @@ module.exports = async (req, res) => {
     const p = m[1].split(",");
     return [parseFloat(p[0]), parseFloat(p[1])];
   };
-  const fetchRaw = async (url) => {
+  const fetchRaw = async (url, timeoutMs = 20000) => {
     try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(timeoutMs) });
       const t = await r.text();
       return { ok: r.ok, status: r.status, text: t };
     } catch(e) { return { ok: false, error: e.message }; }
   };
 
-  // ── Parse DGU number: "182.218" → area=182, number=218 ──────────────────────
-  // dgunr stored as float: 182.218 → the integer part IS the area number
-  // So we can use BETWEEN 182.0 AND 182.9999 to get all boringer in area 182
-  // then match exact string client-side
-  const parts = dgu.split(".");
-  const area  = parseInt(parts[0], 10);   // e.g. 182
-  const num   = parts[1] || "0";          // e.g. "218"
-  const dguFloat = parseFloat(dgu);       // 182.218
+  // ── Parse DGU: "182.218" → lo=182.217, hi=182.219 (±0.001 window) ──────────
+  // This tiny window will only ever contain the exact boring we want
+  const dguFloat = parseFloat(dgu);
+  if (isNaN(dguFloat)) return res.status(400).json({ error: `Ugyldigt DGU format: ${dgu}` });
 
-  if (isNaN(area)) {
-    return res.status(400).json({ error: `Ugyldigt DGU format: ${dgu}. Brug format: 182.218` });
-  }
+  const lo = (dguFloat - 0.0005).toFixed(4);
+  const hi = (dguFloat + 0.0005).toFixed(4);
 
-  // Fetch all boringer in the same area (integer part = area code)
-  // BETWEEN 182.0 AND 182.9999 gets all DGU 182.xxx boringer
-  const lo = `${area}.0`;
-  const hi = `${area}.99999`;
   const searchUrl = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature`
-    + `&typeName=jupiter_boringer_ws&maxFeatures=500`
+    + `&typeName=jupiter_boringer_ws&maxFeatures=10`
     + `&CQL_FILTER=${encodeURIComponent(`dgunr BETWEEN ${lo} AND ${hi}`)}`;
 
-  const raw = await fetchRaw(searchUrl);
+  const raw = await fetchRaw(searchUrl, 20000);
 
   if (!raw.ok) {
-    return res.status(502).json({ error: "GEUS WFS netværksfejl: " + (raw.error || raw.status) });
+    return res.status(502).json({ error: "GEUS WFS fejl: " + (raw.error || raw.status), url: searchUrl });
   }
   if (raw.text.includes("ExceptionReport") || raw.text.includes("HTTP Status")) {
-    return res.status(502).json({ error: "GEUS WFS fejl", preview: raw.text.slice(0, 300) });
+    return res.status(502).json({ error: "GEUS WFS exception", preview: raw.text.slice(0, 300) });
   }
 
-  // Find exact string match among all returned features
+  // Find the feature whose dgunr string exactly matches
   const featureRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
   let fm;
   let boringXML = null;
   const candidates = [];
 
   while ((fm = featureRe.exec(raw.text)) !== null) {
-    const fxml  = fm[1];
-    const fDgu  = g(fxml, "dgunr") || "";
-    const fDguOrg = g(fxml, "dgunr_org") || "";
-    candidates.push({ dgunr: fDgu, dgunr_org: fDguOrg });
+    const fxml    = fm[1];
+    const fDgu    = g(fxml, "dgunr") || "";
+    const fDguOrg = (g(fxml, "dgunr_org") || "").replace(/\.\s+/, ".").trim();
+    candidates.push(fDgu);
+    if (fDgu === dgu || fDguOrg === dgu) { boringXML = fxml; break; }
+  }
 
-    // Exact string match on dgunr
-    if (fDgu === dgu) { boringXML = fxml; break; }
-
-    // Also try dgunr_org which may have format "182. 218" (space after dot)
-    const orgNorm = fDguOrg.replace(/\.\s+/, ".").trim();
-    if (orgNorm === dgu) { boringXML = fxml; break; }
+  // If no exact match in tight window, the decimal part might have more digits
+  // e.g. stored as "182.2180" — normalise and retry
+  if (!boringXML && candidates.length > 0) {
+    // Just take the closest one — within ±0.0005 there should only be one boring
+    const featureRe2 = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
+    const fm2 = featureRe2.exec(raw.text);
+    if (fm2) boringXML = fm2[1];
   }
 
   if (!boringXML) {
     return res.status(404).json({
-      error: `Ingen boring fundet for DGU ${dgu} i område ${area}`,
-      foundInArea: candidates.length,
-      candidates: candidates.slice(0, 20),
-      hint: candidates.length === 0
-        ? "Ingen boringer i dette DGU-område. Tjek at arealforkortelsen er korrekt."
-        : `Fandt ${candidates.length} boringer i område ${area} men ingen matchede ${dgu} præcist. Se candidates for tilgængelige numre.`,
+      error: `Ingen boring fundet for DGU ${dgu}`,
+      searchWindow: `${lo} – ${hi}`,
+      candidates,
     });
   }
 
@@ -188,6 +179,6 @@ module.exports = async (req, res) => {
       cykloUrl,
     },
     litho, anlaeg:[], vandstand:[], dgu,
-    _meta: { borid, pdfUrl, lithoCount: litho.length, areaSearched: area, candidatesInArea: candidates.length },
+    _meta: { borid, pdfUrl, lithoCount: litho.length, searchWindow: `${lo}–${hi}`, candidates },
   });
 };
