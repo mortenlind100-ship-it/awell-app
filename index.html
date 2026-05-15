@@ -1461,15 +1461,25 @@ function App() {
                 <span className="dot" />
                 DGU {jupiterData.dgu}
               </div>
-              {b.pdfUrl && (
-                <a href={b.pdfUrl} target="_blank" rel="noopener"
-                  style={{ display:"flex", alignItems:"center", gap:6, background:"var(--blue)", color:"#fff",
-                    padding:"6px 14px", borderRadius:7, fontFamily:"var(--font-head)", fontWeight:700,
-                    fontSize:11, textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase",
-                    flexShrink:0 }}>
-                  📄 PDF-rapport
-                </a>
-              )}
+              <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                {b.pdfUrl && (
+                  <a href={b.pdfUrl} target="_blank" rel="noopener"
+                    style={{ display:"flex", alignItems:"center", gap:5, background:"var(--blue)", color:"#fff",
+                      padding:"6px 12px", borderRadius:7, fontFamily:"var(--font-head)", fontWeight:700,
+                      fontSize:11, textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                    📄 PDF
+                  </a>
+                )}
+                {b.boreholeUrl && (
+                  <a href={b.boreholeUrl} target="_blank" rel="noopener"
+                    style={{ display:"flex", alignItems:"center", gap:5, background:"var(--blue3)", color:"var(--blue)",
+                      border:"1.5px solid var(--blue4)", padding:"6px 12px", borderRadius:7,
+                      fontFamily:"var(--font-head)", fontWeight:700, fontSize:11,
+                      textDecoration:"none", letterSpacing:"0.06em", textTransform:"uppercase" }}>
+                    🌐 Rapport
+                  </a>
+                )}
+              </div>
             </div>
 
             {/* Stamdata */}
@@ -1498,15 +1508,39 @@ function App() {
             {/* Tekniske data */}
             <div className="section-label">Tekniske data</div>
             <div className="card">
-              <JRow k="Totaldybde (m)"    v={b.dybde} />
-              <JRow k="Forerørsdybde (m)" v={b.forerorDybde} />
-              <JRow k="Forerør materiale" v={b.forerorMateriale} />
-              <JRow k="Forerør Ø (mm)"    v={b.forerorDiameter} />
-              <JRow k="Filter fra (m)"    v={b.filterFra} />
-              <JRow k="Filter til (m)"    v={b.filterTil} />
-              <JRow k="Grundvandsmagasin" v={b.grundvandsmagasin} />
-              <JRow k="Vandstand (m u.t.)" v={b.vandstand} />
+              <JRow k="Totaldybde (m)"      v={b.dybde} />
+              <JRow k="Forerørsdybde (m)"   v={b.forerorDybde} />
+              <JRow k="Forerør Ø (mm)"      v={b.forerorDiameter} />
+              <JRow k="Ro. vandstand (m)"   v={b.rovandstand} />
+              <JRow k="Indvinding (m³/år)"  v={b.indvinding} />
+              <JRow k="Boremetode"          v={b.boremetode} />
+              <JRow k="Ejer"                v={b.ejer} />
+              <JRow k="Journal"             v={b.journal} />
             </div>
+
+            {/* Vandstand historik */}
+            {jupiterData.vandstand && jupiterData.vandstand.length > 0 && (<>
+              <div className="section-label">Vandstandsmålinger ({jupiterData.vandstand.length})</div>
+              <div className="card" style={{ padding:"8px 12px" }}>
+                <div style={{ display:"flex", gap:8, padding:"4px 8px 8px", borderBottom:"1px solid var(--grey1)" }}>
+                  {["Dato","Pejling (m)","Kote (m.o.h.)"].map(h => (
+                    <div key={h} style={{ flex:1, fontFamily:"var(--font-head)", fontWeight:700, fontSize:10, color:"var(--text2)", textTransform:"uppercase", letterSpacing:"0.06em" }}>{h}</div>
+                  ))}
+                </div>
+                {jupiterData.vandstand.slice(0,15).map((v,i) => (
+                  <div key={i} style={{ display:"flex", gap:8, padding:"5px 8px", borderBottom:"1px solid var(--grey1)", fontSize:12 }}>
+                    <div style={{ flex:1, fontFamily:"var(--font-head)", fontWeight:500, color:"var(--blue)" }}>{v.dato}</div>
+                    <div style={{ flex:1 }}>{v.pejling}</div>
+                    <div style={{ flex:1, color:"var(--text2)" }}>{v.kote}</div>
+                  </div>
+                ))}
+                {jupiterData.vandstand.length > 15 && (
+                  <div style={{ padding:"6px 8px", fontSize:10, color:"var(--text2)", fontStyle:"italic" }}>
+                    + {jupiterData.vandstand.length - 15} yderligere målinger — se fuld rapport
+                  </div>
+                )}
+              </div>
+            </>)}
 
             {/* Anlæg / indvindingsanlæg */}
             {anlaeg.length > 0 && (<>
@@ -1553,7 +1587,15 @@ function App() {
                   style={{ flex:1, textAlign:"center", background:"var(--blue)", borderRadius:7,
                     padding:"8px 12px", fontFamily:"var(--font-head)", fontWeight:700,
                     fontSize:11, color:"#fff", textDecoration:"none", letterSpacing:"0.05em" }}>
-                  📄 Download PDF-rapport
+                  📄 Download PDF borerapport
+                </a>
+              )}
+              {!b.pdfUrl && b.boreholeUrl && (
+                <a href={b.boreholeUrl} target="_blank" rel="noopener"
+                  style={{ flex:1, textAlign:"center", background:"var(--blue3)", border:"1.5px solid var(--blue4)", borderRadius:7,
+                    padding:"8px 12px", fontFamily:"var(--font-head)", fontWeight:700,
+                    fontSize:11, color:"var(--blue)", textDecoration:"none", letterSpacing:"0.05em" }}>
+                  🌐 Åbn borerapport (HTML)
                 </a>
               )}
             </div>
