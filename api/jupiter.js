@@ -13,13 +13,13 @@ module.exports = async (req, res) => {
   const dgu = (req.query.dgu || "").trim();
   if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX" });
 
-  // Helper: extract ms: field value from GML
+  // Helper: extract ms: tag value
   const g = (xml, tag) => {
     const m = xml.match(new RegExp(`<ms:${tag}[^>]*>([^<]*)<\\/ms:${tag}>`, "i"));
     return m ? m[1].trim() || null : null;
   };
 
-  // Helper: all ms: fields
+  // Helper: all ms: fields as object
   const allFields = (xml) => {
     const out = {};
     const re = /<ms:([a-zA-Z0-9_]+)[^>]*>([^<]*)<\/ms:/g;
@@ -28,7 +28,7 @@ module.exports = async (req, res) => {
     return out;
   };
 
-  // Helper: GML coordinates
+  // Helper: GML point coordinates
   const coords = (xml) => {
     const m = xml.match(/<gml:coordinates[^>]*>([\d.,-]+)<\/gml:coordinates>/);
     if (!m) return [null, null];
@@ -36,103 +36,87 @@ module.exports = async (req, res) => {
     return [parseFloat(p[0]), parseFloat(p[1])];
   };
 
-  // Helper: fetch GML with OGC XML filter (more reliable than CQL for exact match)
-  const fetchWithXMLFilter = async (typeName, fieldName, value) => {
-    const filter = `<ogc:Filter xmlns:ogc="http://www.opengis.net/ogc"><ogc:PropertyIsEqualTo matchCase="false"><ogc:PropertyName>${fieldName}</ogc:PropertyName><ogc:Literal>${value}</ogc:Literal></ogc:PropertyIsEqualTo></ogc:Filter>`;
-    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=5&FILTER=${encodeURIComponent(filter)}`;
+  // Helper: raw WFS fetch returning GML text or null
+  const fetchGML = async (typeName, params) => {
+    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=10&${params}`;
     try {
       const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
       const t = await r.text();
-      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status") || !t.includes("featureMember")) return null;
+      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status")) return null;
+      if (!t.includes("featureMember")) return null;
       if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
       return t;
     } catch(e) { return null; }
   };
 
-  // Helper: fetch GML with CQL (fallback)
-  const fetchWithCQL = async (typeName, cql) => {
-    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=5&CQL_FILTER=${encodeURIComponent(cql)}`;
-    try {
-      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
-      const t = await r.text();
-      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status") || !t.includes("featureMember")) return null;
-      if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
-      return t;
-    } catch(e) { return null; }
-  };
+  // ── Search strategies ────────────────────────────────────────────────────────
+  // From GML sample: txt_search = "146.3602 Vandforsyningsboring Sløjfet/opgivet bor ukendt"
+  // txt_search starts with dgunr followed by a space — use LIKE '182.218 %' for exact match
 
-  // ── Find boring ─────────────────────────────────────────────────────────────
-  // From GML sample field is <ms:dgunr> — try XML PropertyIsEqualTo first (exact match)
-  // Also try dgunr_org which has format "146. 3602" (with space)
-  let boringGML = null;
   const attempts = [];
+  let boringGML = null;
 
-  // Try 1: XML filter exact match on dgunr
-  boringGML = await fetchWithXMLFilter("jupiter_boringer_ws", "dgunr", dgu);
-  attempts.push({ method: "XML filter dgunr", found: !!boringGML });
+  const strategies = [
+    // Best: txt_search starts with DGU + space (guarantees exact number match)
+    `CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu} %'`)}`,
+    // Also try with leading zero variants or slight format differences
+    `CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu}%'`)}`,
+    // dgunr_org has format "182. 218" (with space after dot) - try both
+    `CQL_FILTER=${encodeURIComponent(`dgunr_org LIKE '${dgu.replace(".", ". ")}%'`)}`,
+    `CQL_FILTER=${encodeURIComponent(`dgunr_org = '${dgu}'`)}`,
+    // strConcat trick: filter where dgunr matches as string exactly
+    `CQL_FILTER=${encodeURIComponent(`strConcat(dgunr,'') = '${dgu}'`)}`,
+  ];
 
-  // Try 2: CQL exact match
-  if (!boringGML) {
-    boringGML = await fetchWithCQL("jupiter_boringer_ws", `dgunr = '${dgu}'`);
-    attempts.push({ method: "CQL dgunr =", found: !!boringGML });
+  for (const params of strategies) {
+    const label = params.split("=").slice(0,2).join("=").slice(-50);
+    const gml = await fetchGML("jupiter_boringer_ws", params);
+    if (gml) {
+      // Verify the returned dgunr actually matches
+      const returnedDgu = g(gml, "dgunr") || "";
+      const match = returnedDgu === dgu;
+      attempts.push({ params: label, returnedDgu, match });
+      if (match) { boringGML = gml; break; }
+      // If not matching, keep trying
+    } else {
+      attempts.push({ params: label, result: "ingen resultater" });
+    }
   }
 
-  // Try 3: txt_search starts with DGU number (format: "182.218 Vandforsyning...")
   if (!boringGML) {
-    boringGML = await fetchWithCQL("jupiter_boringer_ws", `txt_search LIKE '${dgu} %'`);
-    attempts.push({ method: "CQL txt_search LIKE", found: !!boringGML });
-  }
-
-  // Try 4: dgunr_org field (has space: "182. 218")
-  if (!boringGML) {
-    const dguWithSpace = dgu.replace(".", ". ");
-    boringGML = await fetchWithCQL("jupiter_boringer_ws", `dgunr_org LIKE '${dguWithSpace}%'`);
-    attempts.push({ method: "CQL dgunr_org with space", found: !!boringGML });
-  }
-
-  if (!boringGML) {
-    return res.status(404).json({ error: `Ingen boring fundet for DGU ${dgu}`, attempts });
-  }
-
-  // Verify the returned dgunr matches what we asked for (guard against partial matches)
-  const returnedDgu = g(boringGML, "dgunr") || "";
-  if (returnedDgu && returnedDgu !== dgu) {
-    // Try next feature in collection or report mismatch
     return res.status(404).json({
-      error: `WFS returnerede DGU ${returnedDgu} for søgning på ${dgu} — prøv et andet filter`,
+      error: `Ingen præcis match fundet for DGU ${dgu}`,
+      hint: "Bekræft at DGU-nummeret er korrekt. Format: 182.218",
       attempts,
-      returnedDgu,
     });
   }
 
   const bf   = allFields(boringGML);
   const [utmx, utmy] = coords(boringGML);
   const borid = bf.borid || bf.id;
-
-  // ── Fetch litologi via cyklogram URL ────────────────────────────────────────
-  let litho = [];
   const cykloUrl = bf.cyklogram;
+  const boreholeUrl = bf.url;
 
+  // ── Litologi via cyklogram URL ───────────────────────────────────────────────
+  let litho = [];
   if (cykloUrl) {
     try {
-      const cr  = await fetch(cykloUrl, { headers: hdrs, signal: AbortSignal.timeout(10000) });
-      const ct  = await cr.text();
+      const cr = await fetch(cykloUrl, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+      const ct = await cr.text();
 
       if (ct.includes("featureMember")) {
-        // GML response
-        const layerRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
+        const re = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
         let lm;
-        while ((lm = layerRe.exec(ct)) !== null) {
+        while ((lm = re.exec(ct)) !== null) {
           const lf = allFields(lm[1]);
           litho.push({
-            fraM:   lf.fra_m  || lf.fra  || lf.dybde_fra || lf.depth_from,
-            tilM:   lf.til_m  || lf.til  || lf.dybde_til || lf.depth_to,
-            tekst:  lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.symbol_tekst || lf.lithology,
-            symbol: lf.symbol || lf.lith_symbol,
+            fraM:  lf.fra_m || lf.fra || lf.dybde_fra,
+            tilM:  lf.til_m || lf.til || lf.dybde_til,
+            tekst: lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.symbol_tekst,
+            symbol: lf.symbol,
           });
         }
-      } else if (ct.includes("<tr") || ct.includes("<td")) {
-        // HTML table
+      } else if (ct.includes("<td")) {
         const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
         let rm;
         while ((rm = rowRe.exec(ct)) !== null) {
@@ -140,7 +124,7 @@ module.exports = async (req, res) => {
           if (cells && cells.length >= 2) {
             const vals = cells.map(c => c.replace(/<[^>]+>/g, "").trim());
             if (vals[0] && !isNaN(parseFloat(vals[0]))) {
-              litho.push({ fraM: vals[0], tilM: vals[1], tekst: vals[2] || vals[3] || null });
+              litho.push({ fraM: vals[0], tilM: vals[1], tekst: vals[2] || null });
             }
           }
         }
@@ -148,66 +132,44 @@ module.exports = async (req, res) => {
     } catch(_) {}
   }
 
-  // Fallback: WFS layer jupiter_bor_cyklogram
-  if (litho.length === 0 && borid) {
-    const cykGML = await fetchWithXMLFilter("jupiter_bor_cyklogram", "borid", borid)
-                || await fetchWithCQL("jupiter_bor_cyklogram", `borid=${borid}`);
-    if (cykGML) {
-      const layerRe = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
-      let lm;
-      while ((lm = layerRe.exec(cykGML)) !== null) {
-        const lf = allFields(lm[1]);
-        litho.push({
-          fraM:  lf.fra_m || lf.fra,
-          tilM:  lf.til_m || lf.til,
-          tekst: lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.symbol_tekst,
-          symbol: lf.symbol,
-        });
-      }
-    }
-  }
-
   litho = litho
     .filter(l => l.fraM != null || l.tekst)
     .sort((a, b) => (parseFloat(a.fraM) || 0) - (parseFloat(b.fraM) || 0));
 
-  // ── Check for PDF ────────────────────────────────────────────────────────────
-  const dguNoDot = dgu.replace(/\./g, "");
+  // ── PDF check ───────────────────────────────────────────────────────────────
   let pdfUrl = null;
-  const pdfCandidates = [
+  const dguNoDot = dgu.replace(/\./g, "");
+  for (const u of [
     borid ? `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${borid}.pdf` : null,
     `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dguNoDot}.pdf`,
     `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dgu}.pdf`,
-  ].filter(Boolean);
-
-  for (const u of pdfCandidates) {
+  ].filter(Boolean)) {
     try {
-      const r  = await fetch(u, { method: "HEAD", headers: hdrs, signal: AbortSignal.timeout(4000) });
-      const ct = r.headers.get("content-type") || "";
-      if (r.ok && ct.toLowerCase().includes("pdf")) { pdfUrl = u; break; }
+      const r = await fetch(u, { method:"HEAD", headers:hdrs, signal:AbortSignal.timeout(4000) });
+      if (r.ok && (r.headers.get("content-type")||"").toLowerCase().includes("pdf")) { pdfUrl = u; break; }
     } catch(_) {}
   }
 
   return res.status(200).json({
     boring: {
-      dguNr:       bf.dgunr          || dgu,
+      dguNr:       bf.dgunr       || dgu,
       boringsid:   borid,
       formaal:     bf.formaal_tekst  || bf.formaal,
       anvendelse:  bf.anvendelse_tekst || bf.anvendelse,
-      status:      bf.kode_tekst     || bf.kode,
+      status:      bf.kode_tekst  || bf.kode,
       boremetode:  bf.broendborer,
-      dato:        bf.dato           || bf.aar,
+      dato:        bf.dato        || bf.aar,
       kommune:     bf.kommunenavn,
       region:      bf.region_tekst,
       adresse:     bf.sted1,
       postnr:      bf.postnr,
-      utmx:        utmx              || bf.xutm,
-      utmy:        utmy              || bf.yutm,
+      utmx:        utmx           || parseFloat(bf.xutm),
+      utmy:        utmy           || parseFloat(bf.yutm),
       kote:        bf.terraen_kote,
-      dybde:       bf.dybde_num      || bf.dybde,
+      dybde:       bf.dybde_num   || bf.dybde,
       dataejer:    bf.dataejer,
       pdfUrl,
-      boreholeUrl: bf.url,
+      boreholeUrl,
       cykloUrl,
     },
     litho,
