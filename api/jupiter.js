@@ -6,12 +6,38 @@ module.exports = async (req, res) => {
   const WFS  = "https://data.geus.dk/geusmap/ows/25832.jsp";
   const hdrs = { Accept: "*/*", "User-Agent": "Mozilla/5.0 Awell/1.0" };
 
-  if (req.query.caps)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
-  if (req.query.desc)   { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=DescribeFeatureType&typeName=${req.query.layer||"jupiter_boringer_ws"}`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
-  if (req.query.sample) { const r = await fetch(`${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${req.query.layer||"jupiter_boringer_ws"}&maxFeatures=1`,{headers:hdrs}); res.setHeader("Content-Type","text/xml"); return res.status(r.status).send(await r.text()); }
+  // ?ping — test basic connectivity to GEUS
+  if (req.query.ping) {
+    try {
+      const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetCapabilities`;
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+      const text = await r.text();
+      return res.status(200).json({
+        httpStatus: r.status,
+        contentType: r.headers.get("content-type"),
+        bodyStart: text.slice(0, 300),
+        ok: r.ok,
+      });
+    } catch(e) {
+      return res.status(200).json({ error: e.message, errorType: e.constructor.name });
+    }
+  }
+
+  if (req.query.sample) {
+    try {
+      const layer = req.query.layer || "jupiter_boringer_ws";
+      const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${layer}&maxFeatures=1`;
+      const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(10000) });
+      const t = await r.text();
+      res.setHeader("Content-Type", "text/xml");
+      return res.status(r.status).send(t);
+    } catch(e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
 
   const dgu = (req.query.dgu || "").trim();
-  if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX" });
+  if (!dgu) return res.status(400).json({ error: "Mangler ?dgu=XXX.XXX — eller brug ?ping=1 for at teste forbindelsen" });
 
   // Helper: extract ms: tag value
   const g = (xml, tag) => {
@@ -19,7 +45,6 @@ module.exports = async (req, res) => {
     return m ? m[1].trim() || null : null;
   };
 
-  // Helper: all ms: fields as object
   const allFields = (xml) => {
     const out = {};
     const re = /<ms:([a-zA-Z0-9_]+)[^>]*>([^<]*)<\/ms:/g;
@@ -28,7 +53,6 @@ module.exports = async (req, res) => {
     return out;
   };
 
-  // Helper: GML point coordinates
   const coords = (xml) => {
     const m = xml.match(/<gml:coordinates[^>]*>([\d.,-]+)<\/gml:coordinates>/);
     if (!m) return [null, null];
@@ -36,85 +60,72 @@ module.exports = async (req, res) => {
     return [parseFloat(p[0]), parseFloat(p[1])];
   };
 
-  // Helper: raw WFS fetch returning GML text or null
-  const fetchGML = async (typeName, params) => {
-    const url = `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=${typeName}&maxFeatures=10&${params}`;
+  // Fetch with full error details
+  const fetchGML = async (label, url) => {
     try {
       const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000) });
       const t = await r.text();
-      if (!r.ok || t.includes("ExceptionReport") || t.includes("HTTP Status")) return null;
-      if (!t.includes("featureMember")) return null;
-      if (t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'")) return null;
-      return t;
-    } catch(e) { return null; }
+      const preview = t.slice(0, 200).replace(/\s+/g, " ");
+      const isEmpty = t.includes('numberOfFeatures="0"') || t.includes("numberOfFeatures='0'") || !t.includes("featureMember");
+      const isError = t.includes("ExceptionReport") || t.includes("HTTP Status");
+      return {
+        label, url: url.slice(50),
+        httpStatus: r.status,
+        isEmpty, isError, preview,
+        text: (!isEmpty && !isError && r.ok) ? t : null,
+      };
+    } catch(e) {
+      return { label, url: url.slice(50), error: e.message, errorType: e.constructor.name };
+    }
   };
 
-  // ── Search strategies ────────────────────────────────────────────────────────
-  // From GML sample: txt_search = "146.3602 Vandforsyningsboring Sløjfet/opgivet bor ukendt"
-  // txt_search starts with dgunr followed by a space — use LIKE '182.218 %' for exact match
+  const strategies = [
+    { label: "txt_search LIKE dgu+space",
+      url: `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu} %'`)}` },
+    { label: "txt_search LIKE dgu (no space)",
+      url: `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu}%'`)}` },
+    { label: "dgunr_org LIKE dgu+dot+space",
+      url: `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&CQL_FILTER=${encodeURIComponent(`dgunr_org LIKE '${dgu.replace(".", ". ")}%'`)}` },
+    { label: "dgunr_org = dgu",
+      url: `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&CQL_FILTER=${encodeURIComponent(`dgunr_org = '${dgu}'`)}` },
+    { label: "dgunr = dgu (original)",
+      url: `${WFS}?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=5&CQL_FILTER=${encodeURIComponent(`dgunr = '${dgu}'`)}` },
+  ];
 
   const attempts = [];
   let boringGML = null;
 
-  const strategies = [
-    // Best: txt_search starts with DGU + space (guarantees exact number match)
-    `CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu} %'`)}`,
-    // Also try with leading zero variants or slight format differences
-    `CQL_FILTER=${encodeURIComponent(`txt_search LIKE '${dgu}%'`)}`,
-    // dgunr_org has format "182. 218" (with space after dot) - try both
-    `CQL_FILTER=${encodeURIComponent(`dgunr_org LIKE '${dgu.replace(".", ". ")}%'`)}`,
-    `CQL_FILTER=${encodeURIComponent(`dgunr_org = '${dgu}'`)}`,
-    // strConcat trick: filter where dgunr matches as string exactly
-    `CQL_FILTER=${encodeURIComponent(`strConcat(dgunr,'') = '${dgu}'`)}`,
-  ];
-
-  for (const params of strategies) {
-    const label = params.split("=").slice(0,2).join("=").slice(-50);
-    const gml = await fetchGML("jupiter_boringer_ws", params);
-    if (gml) {
-      // Verify the returned dgunr actually matches
-      const returnedDgu = g(gml, "dgunr") || "";
-      const match = returnedDgu === dgu;
-      attempts.push({ params: label, returnedDgu, match });
-      if (match) { boringGML = gml; break; }
-      // If not matching, keep trying
-    } else {
-      attempts.push({ params: label, result: "ingen resultater" });
+  for (const s of strategies) {
+    const result = await fetchGML(s.label, s.url);
+    attempts.push({ label: result.label, httpStatus: result.httpStatus, isEmpty: result.isEmpty, isError: result.isError, error: result.error, errorType: result.errorType, preview: result.preview });
+    if (result.text) {
+      const returnedDgu = g(result.text, "dgunr") || "";
+      attempts[attempts.length-1].returnedDgu = returnedDgu;
+      if (returnedDgu === dgu) { boringGML = result.text; break; }
     }
   }
 
   if (!boringGML) {
-    return res.status(404).json({
-      error: `Ingen præcis match fundet for DGU ${dgu}`,
-      hint: "Bekræft at DGU-nummeret er korrekt. Format: 182.218",
-      attempts,
-    });
+    return res.status(404).json({ error: `Ingen præcis match for DGU ${dgu}`, attempts });
   }
 
   const bf   = allFields(boringGML);
   const [utmx, utmy] = coords(boringGML);
-  const borid = bf.borid || bf.id;
+  const borid    = bf.borid || bf.id;
   const cykloUrl = bf.cyklogram;
-  const boreholeUrl = bf.url;
 
-  // ── Litologi via cyklogram URL ───────────────────────────────────────────────
+  // Litologi
   let litho = [];
   if (cykloUrl) {
     try {
       const cr = await fetch(cykloUrl, { headers: hdrs, signal: AbortSignal.timeout(10000) });
       const ct = await cr.text();
-
       if (ct.includes("featureMember")) {
         const re = /<gml:featureMember>([\s\S]*?)<\/gml:featureMember>/g;
         let lm;
         while ((lm = re.exec(ct)) !== null) {
           const lf = allFields(lm[1]);
-          litho.push({
-            fraM:  lf.fra_m || lf.fra || lf.dybde_fra,
-            tilM:  lf.til_m || lf.til || lf.dybde_til,
-            tekst: lf.litologi_tekst || lf.tekst || lf.beskrivelse || lf.symbol_tekst,
-            symbol: lf.symbol,
-          });
+          litho.push({ fraM: lf.fra_m||lf.fra, tilM: lf.til_m||lf.til, tekst: lf.litologi_tekst||lf.tekst||lf.beskrivelse||lf.symbol_tekst, symbol: lf.symbol });
         }
       } else if (ct.includes("<td")) {
         const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -122,27 +133,21 @@ module.exports = async (req, res) => {
         while ((rm = rowRe.exec(ct)) !== null) {
           const cells = rm[1].match(/<td[^>]*>([^<]*)<\/td>/gi);
           if (cells && cells.length >= 2) {
-            const vals = cells.map(c => c.replace(/<[^>]+>/g, "").trim());
-            if (vals[0] && !isNaN(parseFloat(vals[0]))) {
-              litho.push({ fraM: vals[0], tilM: vals[1], tekst: vals[2] || null });
-            }
+            const vals = cells.map(c => c.replace(/<[^>]+>/g,"").trim());
+            if (vals[0] && !isNaN(parseFloat(vals[0]))) litho.push({ fraM: vals[0], tilM: vals[1], tekst: vals[2]||null });
           }
         }
       }
     } catch(_) {}
   }
+  litho = litho.filter(l => l.fraM||l.tekst).sort((a,b) => (parseFloat(a.fraM)||0)-(parseFloat(b.fraM)||0));
 
-  litho = litho
-    .filter(l => l.fraM != null || l.tekst)
-    .sort((a, b) => (parseFloat(a.fraM) || 0) - (parseFloat(b.fraM) || 0));
-
-  // ── PDF check ───────────────────────────────────────────────────────────────
+  // PDF
   let pdfUrl = null;
-  const dguNoDot = dgu.replace(/\./g, "");
+  const dguNoDot = dgu.replace(/\./g,"");
   for (const u of [
     borid ? `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${borid}.pdf` : null,
     `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dguNoDot}.pdf`,
-    `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dgu}.pdf`,
   ].filter(Boolean)) {
     try {
       const r = await fetch(u, { method:"HEAD", headers:hdrs, signal:AbortSignal.timeout(4000) });
@@ -152,30 +157,19 @@ module.exports = async (req, res) => {
 
   return res.status(200).json({
     boring: {
-      dguNr:       bf.dgunr       || dgu,
-      boringsid:   borid,
-      formaal:     bf.formaal_tekst  || bf.formaal,
-      anvendelse:  bf.anvendelse_tekst || bf.anvendelse,
-      status:      bf.kode_tekst  || bf.kode,
-      boremetode:  bf.broendborer,
-      dato:        bf.dato        || bf.aar,
-      kommune:     bf.kommunenavn,
-      region:      bf.region_tekst,
-      adresse:     bf.sted1,
-      postnr:      bf.postnr,
-      utmx:        utmx           || parseFloat(bf.xutm),
-      utmy:        utmy           || parseFloat(bf.yutm),
-      kote:        bf.terraen_kote,
-      dybde:       bf.dybde_num   || bf.dybde,
-      dataejer:    bf.dataejer,
-      pdfUrl,
-      boreholeUrl,
-      cykloUrl,
+      dguNr: bf.dgunr||dgu, boringsid: borid,
+      formaal: bf.formaal_tekst||bf.formaal,
+      anvendelse: bf.anvendelse_tekst||bf.anvendelse,
+      status: bf.kode_tekst||bf.kode,
+      boremetode: bf.broendborer, dato: bf.dato||bf.aar,
+      kommune: bf.kommunenavn, region: bf.region_tekst,
+      adresse: bf.sted1, postnr: bf.postnr,
+      utmx: utmx||parseFloat(bf.xutm), utmy: utmy||parseFloat(bf.yutm),
+      kote: bf.terraen_kote, dybde: bf.dybde_num||bf.dybde,
+      dataejer: bf.dataejer, pdfUrl,
+      boreholeUrl: bf.url, cykloUrl,
     },
-    litho,
-    anlaeg: [],
-    vandstand: [],
-    dgu,
+    litho, anlaeg: [], vandstand: [], dgu,
     _meta: { borid, pdfUrl, lithoCount: litho.length, attempts },
   });
 };
