@@ -656,14 +656,48 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 const fmtDate = d => new Date(d).toLocaleString("da-DK", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 const fmtCoord = (lat, lng) => lat && lng ? `${lat.toFixed(5)}, ${lng.toFixed(5)}` : "Ikke tilgængelig";
 
+// WGS84 → UTM zone 32N (EUREF89/ED50, EPSG:25832)
+const wgs84ToUtm32 = (lat, lng) => {
+  const a = 6378137.0, f = 1/298.257223563;
+  const b = a*(1-f), e2 = 1 - (b/a)**2;
+  const k0 = 0.9996, lon0 = 9 * Math.PI/180; // zone 32 central meridian
+  const latR = lat * Math.PI/180, lngR = lng * Math.PI/180;
+  const N = a / Math.sqrt(1 - e2*Math.sin(latR)**2);
+  const T = Math.tan(latR)**2;
+  const C = e2/(1-e2) * Math.cos(latR)**2;
+  const A = Math.cos(latR) * (lngR - lon0);
+  const e4 = e2*e2, e6 = e2**3;
+  const M = a*((1 - e2/4 - 3*e4/64 - 5*e6/256)*latR
+              - (3*e2/8 + 3*e4/32 + 45*e6/1024)*Math.sin(2*latR)
+              + (15*e4/256 + 45*e6/1024)*Math.sin(4*latR)
+              - (35*e6/3072)*Math.sin(6*latR));
+  const easting = k0*N*(A + (1-T+C)*A**3/6 + (5-18*T+T**2+72*C-58*e2/(1-e2))*A**5/120) + 500000;
+  const northing = k0*(M + N*Math.tan(latR)*(A**2/2 + (5-T+9*C+4*C**2)*A**4/24 + (61-58*T+T**2+600*C-330*e2/(1-e2))*A**6/720));
+  return { e: Math.round(easting), n: Math.round(northing) };
+};
+
+// Format GPS position as UTM32 EUREF89 string
+const fmtUtm32 = (lat, lng) => {
+  if (!lat || !lng) return "Ikke tilgængelig";
+  const { e, n } = wgs84ToUtm32(parseFloat(lat), parseFloat(lng));
+  return `E ${e.toLocaleString("da-DK")}  N ${n.toLocaleString("da-DK")}`;
+};
+
+// Format short: "E 707376 N 6222197"
+const fmtUtm32Short = (lat, lng) => {
+  if (!lat || !lng) return null;
+  const { e, n } = wgs84ToUtm32(parseFloat(lat), parseFloat(lng));
+  return `E ${e}  N ${n}`;
+};
+
 // ── Sub-components ───────────────────────────────────────────────────────────
 function GPSBadge({ gps }) {
   return (
     <div className="gps-badge">
       <div className={`gps-dot ${gps.status}`} />
       <div className="gps-text">
-        <strong>{gps.status === "ok" ? fmtCoord(gps.lat, gps.lng) : gps.status === "waiting" ? "Henter position…" : "GPS utilgængeligt"}</strong>
-        <span>{gps.status === "ok" ? `±${Math.round(gps.acc)}m nøjagtighed · ${fmtDate(gps.ts)}` : "Aktiver GPS for at registrere position"}</span>
+        <strong>{gps.status === "ok" ? fmtUtm32(gps.lat, gps.lng) : gps.status === "waiting" ? "Henter position…" : "GPS utilgængeligt"}</strong>
+        <span>{gps.status === "ok" ? `EUREF89 UTM32 · ±${Math.round(gps.acc)}m` : "Aktiver GPS for at registrere position"}</span>
       </div>
       {gps.status === "ok" && <span style={{ color: "var(--teal)", fontSize: 18 }}>📡</span>}
     </div>
@@ -1123,16 +1157,21 @@ function App() {
           </div>
           <div className="field-row">
             <div className="field">
-              <label>Breddegrad (Lat)</label>
-              <input type="number" placeholder="56.0000" value={w.lat} onChange={e => setWellField(null, "lat", e.target.value)} />
+              <label>Breddegrad (WGS84 Lat)</label>
+              <input type="number" placeholder="56.0000" step="0.00001" value={w.lat} onChange={e => setWellField(null, "lat", e.target.value)} />
             </div>
             <div className="field">
-              <label>Længdegrad (Lng)</label>
-              <input type="number" placeholder="10.0000" value={w.lng} onChange={e => setWellField(null, "lng", e.target.value)} />
+              <label>Længdegrad (WGS84 Lng)</label>
+              <input type="number" placeholder="10.0000" step="0.00001" value={w.lng} onChange={e => setWellField(null, "lng", e.target.value)} />
             </div>
           </div>
+          {w.lat && w.lng && (
+            <div style={{ background:"var(--blue3)", border:"1px solid var(--blue4)", borderRadius:7, padding:"8px 12px", marginBottom:10, fontFamily:"var(--font-head)", fontSize:12, color:"var(--blue)", fontWeight:600 }}>
+              📐 UTM32 EUREF89: {fmtUtm32(w.lat, w.lng)}
+            </div>
+          )}
           <button className="btn btn-secondary btn-sm" style={{ marginBottom: 14, borderColor: "var(--blue4)", color: "var(--blue)" }} onClick={() => {
-            if (gps.status === "ok") { setWellField(null, "lat", gps.lat); setWellField(null, "lng", gps.lng); showToast("📍 GPS-koordinat hentet"); }
+            if (gps.status === "ok") { setWellField(null, "lat", gps.lat); setWellField(null, "lng", gps.lng); showToast(`📍 ${fmtUtm32(gps.lat, gps.lng)}`); }
             else showToast("⚠️ GPS ikke tilgængeligt");
           }}>📡 Brug aktuel GPS-position</button>
           <div className="field">
