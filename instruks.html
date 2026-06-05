@@ -68,23 +68,78 @@ const GREJ_STANDARD = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
-function beregnLag(lag, bundpejling) {
+// Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
+function diaVedDybde(dybde, forerSections, filterSections) {
+  // Check filter først (indre forerør)
+  for (const fs of (filterSections || [])) {
+    if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
+  }
+  // Derefter forerør
+  for (const fr of (forerSections || [])) {
+    if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
+  }
+  return null;
+}
+
+// Opdeler et lag [fraDybde, tilDybde] i sub-intervaller ved hvert diameter-skift
+function splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections) {
+  // Saml alle breakpoints inden for intervallet
+  const breaks = new Set([fraDybde, tilDybde]);
+  for (const fr of (forerSections || [])) {
+    if (fr.top > fraDybde && fr.top < tilDybde) breaks.add(fr.top);
+    if (fr.bund > fraDybde && fr.bund < tilDybde) breaks.add(fr.bund);
+  }
+  for (const fs of (filterSections || [])) {
+    if (fs.fra > fraDybde && fs.fra < tilDybde) breaks.add(fs.fra);
+    if (fs.til > fraDybde && fs.til < tilDybde) breaks.add(fs.til);
+  }
+  const sorted = Array.from(breaks).sort((a, b) => a - b);
+  return sorted.slice(0, -1).map((fra, i) => {
+    const til = sorted[i + 1];
+    const midDybde = (fra + til) / 2;
+    return { fra, til, dia: diaVedDybde(midDybde, forerSections, filterSections) };
+  });
+}
+
+function beregnLag(lag, bundpejling, primærBoring) {
   let dybde = parseFloat(bundpejling);
-  if (isNaN(dybde)) return lag.map(l => ({ ...l }));
+  if (isNaN(dybde)) return lag.map(l => ({ ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [] }));
+
+  const forerSections  = primærBoring?.forerSections  || [];
+  const filterSections = primærBoring?.filterSections || [];
+
   return [...lag].reverse().map(l => {
     const mat = MATERIALER.find(m => m.id === l.material);
-    const dia = parseFloat(l.diaMm);
     const kg  = parseFloat(l.kg);
-    if (!mat || isNaN(dia) || dia <= 0 || isNaN(kg) || kg <= 0) {
-      return { ...l, fraDybde: null, tilDybde: null, tykkelse: null };
+    if (!mat || isNaN(kg) || kg <= 0) {
+      return { ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [] };
     }
-    const r = dia / 2 / 1000;
-    const lpm = Math.PI * r * r * 1000;
-    const tykkelse = (kg / mat.kgPerL) / lpm;
+
+    // Bestem startdiameter (ved nuværende dybde)
+    const startDia = diaVedDybde(dybde - 0.01, forerSections, filterSections)
+                  || parseFloat(l.diaMm) || 0;
+    if (startDia <= 0) {
+      return { ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [],
+        diaMm: l.diaMm };
+    }
+
+    // Beregn tykkelse med gennemsnitsdiameter (simpel approx – raffineres nedenfor)
+    const r0  = startDia / 2 / 1000;
+    const lpm0 = Math.PI * r0 * r0 * 1000;
+    const tykkelse = (kg / mat.kgPerL) / lpm0;
     const tilDybde = dybde;
     const fraDybde = Math.max(0, dybde - tykkelse);
     dybde = fraDybde;
-    return { ...l, fraDybde, tilDybde, tykkelse };
+
+    // Split i sub-intervaller ved diametersskift
+    const subLag = splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections)
+      .map(s => ({ ...s, dia: s.dia || startDia }));
+
+    // Sammensæt diastreng til visning
+    const diasArr = [...new Set(subLag.map(s => s.dia).filter(Boolean))];
+    const diaStr  = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : (startDia + " mm");
+
+    return { ...l, fraDybde, tilDybde, tykkelse, diaMm: String(startDia), diaStr, subLag };
   }).reverse();
 }
 
@@ -96,20 +151,27 @@ async function hentJupiter(dguNr) {
   const json = await resp.json();
   if (!resp.ok || json.error) throw new Error(json.error || "Boring ikke fundet");
   const b = json.boring || {};
+  // Seneste pejling: "3.45 (12-03-2024)"
+  const sp = b.senestePejling;
+  const rovandMedDato = sp
+    ? sp.pejling + (sp.dato ? " (" + sp.dato + ")" : "")
+    : b.rovandstand || "";
   return {
-    dgu:         clean,
-    adresse:     b.adresse  || "",
-    kommune:     b.kommune  || "",
-    totaldybde:  b.dybde    || "",
-    rovandspejl: b.rovandstand      || "",
-    forerDia:    b.forerorDiameter  || "",
-    forerDybde:  b.forerorDybde     || "",
-    filterFra:   "",
-    filterTil:   "",
-    filterDia:   "",
-    borid:       b.boringsid    || "",
-    boreholeUrl: b.boreholeUrl  || "",
-    pdfUrl:      b.pdfUrl       || "",
+    dgu:             clean,
+    adresse:         b.adresse  || "",
+    kommune:         b.kommune  || "",
+    totaldybde:      b.dybde    || "",
+    rovandspejl:     rovandMedDato,
+    forerDia:        b.forerorDiameter  || "",
+    forerBund:       b.forerorBund      || "",
+    forerSections:   b.forerorSections  || [],
+    filterFra:       b.filterFra        || "",
+    filterTil:       b.filterTil        || "",
+    filterDia:       b.filterDiameter   || "",
+    filterSections:  b.filterSections   || [],
+    borid:           b.boringsid    || "",
+    boreholeUrl:     b.boreholeUrl  || "",
+    pdfUrl:          b.pdfUrl       || "",
   };
 }
 
@@ -135,7 +197,7 @@ function buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej) {
   if (projekt.pumpeSkalTraekkes) defaultTasks.push("Adskil installation og træk pumpe og stigrør");
   defaultTasks.push("Foretag bundpejling og registrér (m.u.t.)");
   defaultTasks.push("Foretag rovandspejling og registrér (m.u.t.)");
-  if (projekt.artesisk) defaultTasks.push("⚠ Boring er artesisk – forhøj boring til min. 1 m over terræn inden sløjfning");
+  // Artesisk flagges i header – ingen særlig opgavetrin
   defaultTasks.push("Sløjf boring/brønd med materialer som angivet i sekvensen");
   defaultTasks.push("Tilfør vand undervejs efterhånden som bentonit kvæller");
   defaultTasks.push("Nedskær forerør til 1 m.u.t. og retablér terræn");
@@ -172,7 +234,7 @@ xmlns="http://www.w3.org/TR/REC-html40">
 <h1>ARBEJDSINSTRUKS – SLØJFNING</h1>
 <p><strong>${(projekt.sagsnummer ? projekt.sagsnummer + "  ·  " : "") + (projekt.titel || "Sløjfning")}</strong>${dato ? "  &nbsp;|&nbsp;  " + dato : ""}</p>
 
-${projekt.artesisk ? '<div class="advarsel">⚠  ARTESISK BORING – OVERTRYK. Boring skal forhøjes til min. 1 m over terræn inden sløjfning påbegyndes.</div>' : ""}
+${projekt.artesisk ? '<div class="advarsel">⚠  ARTESISK BORING – boringen er artesisk (overtryk).</div>' : ""}
 
 <h2>1.  Opgaveoversigt</h2>
 <table>
@@ -189,7 +251,7 @@ ${projekt.specialHensyn ? `<div class="info">ℹ  <strong>Særlige hensyn:</stro
 <h2>2.  Boringer og brønde</h2>
 ${boringer.map((bo, i) => {
   const forerDia   = bo.forerDiaFelt   || bo.forerDia   || "–";
-  const forerDybde = bo.forerDybdeFelt || bo.forerDybde || "–";
+  const forerDybde = bo.forerBundFelt  || bo.forerBund  || "–";
   const rovand     = bo.rovandspejlFelt || bo.rovandspejl || "–";
   const dybde      = bo.bundpejling || bo.totaldybde || "–";
   const filterFra  = bo.filterFraFelt  || bo.filterFra  || "–";
@@ -201,8 +263,8 @@ ${boringer.map((bo, i) => {
 <h3>${i+1}.  DGU ${bo.dgu || "–"}  ·  ${typeLabel(bo.type)}</h3>
 <table>
   ${harBoring ? `
-  <tr><td class="lbl">Bundpejling (m.u.t.)</td><td>${dybde}</td><td class="lbl">Rovandspejl (m.u.t.)</td><td>${rovand}</td></tr>
-  <tr><td class="lbl">Forerør indv. Ø (mm)</td><td>${forerDia}</td><td class="lbl">Forerør dybde (m.u.t.)</td><td>${forerDybde}</td></tr>
+  <tr><td class="lbl">Dybde (m.u.t.)</td><td>${dybde}</td><td class="lbl">Seneste pejling (m.u.t.)</td><td>${rovand}</td></tr>
+  <tr><td class="lbl">Forerør Ø (mm)</td><td>${forerDia}</td><td class="lbl">Forerør bund (m.u.t.)</td><td>${forerDybde}</td></tr>
   <tr><td class="lbl">Filter Ø (mm)</td><td>${filterDia}</td><td class="lbl">Filter fra – til (m.u.t.)</td><td>${filterFra} – ${filterTil}</td></tr>
   ` : ""}
   ${harBrønd ? `
@@ -213,8 +275,23 @@ ${boringer.map((bo, i) => {
 ${bo.noter ? `<div class="info">ℹ  ${bo.noter.replace(/\n/g, "<br>")}</div>` : ""}`;
 }).join("")}
 
-<h2>3.  Sløjfningssekvens</h2>
+<h2>3.  Sløjfningsprofil og sekvens</h2>
 <p>Materialer tilføres i nedenstående rækkefølge – <strong>fra bunden og op</strong>:</p>
+<table style="width:100%; border-collapse:collapse; margin-bottom:10pt; font-size:9pt;">
+  <tr>
+    ${beregnetLag.filter(l => l.fraDybde != null).map((l, i) => {
+      const mat = MATERIALER.find(m => m.id === l.material);
+      const h_pct = ((l.tilDybde - l.fraDybde) / parseFloat(bundpejling || 1) * 100).toFixed(1);
+      return \`<td style="background:\${mat?.farve||'#ccc'}; height:30pt; width:\${h_pct}%; border:1px solid #fff; vertical-align:middle; text-align:center; font-size:8pt; color:#fff; font-weight:bold;">\${mat?.label?.split(" ")[0]}</td>\`;
+    }).join("")}
+  </tr>
+  <tr>
+    ${beregnetLag.filter(l => l.fraDybde != null).map(l => {
+      const h_pct = ((l.tilDybde - l.fraDybde) / parseFloat(bundpejling || 1) * 100).toFixed(1);
+      return \`<td style="width:\${h_pct}%; font-size:8pt; text-align:center; color:#555; padding:2pt;">\${l.fraDybde.toFixed(1)}–\${l.tilDybde.toFixed(1)} m</td>\`;
+    }).join("")}
+  </tr>
+</table>
 <table>
   <tr><th>#</th><th>Materiale</th><th>Fra (m.u.t.)</th><th>Til (m.u.t.)</th><th>Tykkelse (m)</th><th>Mængde (kg)</th></tr>
   ${beregnetLag.map((l, i) => `
@@ -317,18 +394,20 @@ function BoringKort({ b, i, onChange, onFjern }) {
       const d = await hentJupiter(b.dgu);
       onChange({
         ...b,
-        jupiterOk:   true,
+        jupiterOk:      true,
         jupiterAdresse: d.adresse,
-        totaldybde:  d.totaldybde  || b.totaldybde,
-        rovandspejl: d.rovandspejl || b.rovandspejl,
-        forerDia:    d.forerDia    || b.forerDia,
-        forerDybde:  d.forerDybde  || b.forerDybde,
-        filterFra:   d.filterFra   || b.filterFra,
-        filterTil:   d.filterTil   || b.filterTil,
-        filterDia:   d.filterDia   || b.filterDia,
-        kommune:     d.kommune     || b.kommune,
-        boreholeUrl: d.boreholeUrl,
-        pdfUrl:      d.pdfUrl,
+        totaldybde:     d.totaldybde    || b.totaldybde,
+        rovandspejl:    d.rovandspejl   || b.rovandspejl,
+        forerDia:       d.forerDia      || b.forerDia,
+        forerBund:      d.forerBund     || b.forerBund,
+        forerSections:  d.forerSections || b.forerSections || [],
+        filterFra:      d.filterFra     || b.filterFra,
+        filterTil:      d.filterTil     || b.filterTil,
+        filterDia:      d.filterDia     || b.filterDia,
+        filterSections: d.filterSections|| b.filterSections || [],
+        kommune:        d.kommune       || b.kommune,
+        boreholeUrl:    d.boreholeUrl,
+        pdfUrl:         d.pdfUrl,
       });
     } catch (e) { setFejl(e.message); }
     setLader(false);
@@ -396,12 +475,12 @@ function BoringKort({ b, i, onChange, onFjern }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
         <div style={{ marginBottom: 10 }}>
-          <label style={lbl}>Bundpejling (m.u.t.)</label>
+          <label style={lbl}>Dybde (m.u.t.)</label>
           <input style={inp} type="number" step="0.01"
             placeholder={b.totaldybde || "f.eks. 34.0"}
             value={b.bundpejling} onChange={e => upd("bundpejling", e.target.value)} />
           {b.totaldybde && !b.bundpejling &&
-            <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>Jupiter: {b.totaldybde} m</div>}
+            <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>Fra Jupiter: {b.totaldybde} m</div>}
         </div>
         <div style={{ marginBottom: 10 }}>
           <label style={lbl}>Rovandspejl (m.u.t.)</label>
@@ -412,16 +491,16 @@ function BoringKort({ b, i, onChange, onFjern }) {
 
         {harBoring && <>
           <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Forerør indv. Ø (mm)</label>
+            <label style={lbl}>Forerør Ø (mm)</label>
             <input style={inp} type="number"
               placeholder={b.forerDia || "f.eks. 203"}
               value={b.forerDiaFelt} onChange={e => upd("forerDiaFelt", e.target.value)} />
           </div>
           <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Forerør dybde (m.u.t.)</label>
+            <label style={lbl}>Forerør bund (m.u.t.)</label>
             <input style={inp} type="number" step="0.01"
-              placeholder={b.forerDybde || ""}
-              value={b.forerDybdeFelt} onChange={e => upd("forerDybdeFelt", e.target.value)} />
+              placeholder={b.forerBund || ""}
+              value={b.forerBundFelt} onChange={e => upd("forerBundFelt", e.target.value)} />
           </div>
           <div style={{ marginBottom: 10 }}>
             <label style={lbl}>Filter Ø (mm)</label>
@@ -502,7 +581,9 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
         <div>
           <label style={lbl}>Ø (mm)</label>
           <input style={inp} type="number" step="1"
-            value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)} placeholder="mm" />
+            value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)}
+            placeholder="Hentes fra boring" />
+          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>Bruges hvis ingen boring-data</div>
         </div>
       </div>
       {calc?.fraDybde != null && (
@@ -510,6 +591,9 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
           padding: "5px 10px", fontSize: 12, color: C.blue, fontWeight: 600 }}>
           📏 {calc.fraDybde.toFixed(2)} – {calc.tilDybde.toFixed(2)} m.u.t.
           &nbsp;·&nbsp; {calc.tykkelse.toFixed(2)} m tykkelse
+          {calc.diaStr && <span style={{ marginLeft: 8, fontWeight: 400, color: C.text2 }}>
+            · Ø {calc.diaStr}
+          </span>}
         </div>
       )}
     </div>
@@ -517,54 +601,149 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
 }
 
 // ─── Profil-visualisering ─────────────────────────────────────────────────────
-function Profil({ lag, bundpejling }) {
+function Profil({ lag, bundpejling, forerSections, filterSections, inline }) {
   const maks = parseFloat(bundpejling);
   if (!bundpejling || isNaN(maks) || maks <= 0) return null;
   if (!lag.some(l => l.fraDybde != null)) return null;
-  const H = 220;
+
+  const H = inline ? 300 : 280;
+  const MAXW = 80; // max profil-bredde i px
+
+  // Find maks diameter for skalering
+  const allDias = [
+    ...(forerSections || []).map(s => s.dia),
+    ...(filterSections || []).map(s => s.dia),
+  ].filter(Boolean);
+  const maksDia = allDias.length > 0 ? Math.max(...allDias) : 200;
+
+  // Byg liste af alle diameter-zoner (forerør + filter) til at tegne profil-konturen
+  const diaZoner = [];
+  for (const fr of (forerSections || [])) {
+    diaZoner.push({ fra: fr.top, til: fr.bund, dia: fr.dia });
+  }
+  for (const fs of (filterSections || [])) {
+    // Filter overskrider forerør – bruges som indre zone
+    diaZoner.push({ fra: fs.fra, til: fs.til, dia: fs.dia });
+  }
+  diaZoner.sort((a, b) => a.fra - b.fra);
+
+  // Hjælper: bredde i px ved en given dybde
+  const breddePct = (dia) => Math.max(0.2, (dia || maksDia) / maksDia);
+
   return (
     <div style={{ background: C.white, border: "1px solid " + C.blue4,
-      borderRadius: 8, padding: 16, marginTop: 16 }}>
-      <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
+      borderRadius: 8, padding: 16, marginTop: inline ? 0 : 16 }}>
+      {!inline && <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
         color: C.blue, fontSize: 13, marginBottom: 12 }}>
         📊 Sløjfningsprofil
-      </div>
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
-        <div style={{ position: "relative", width: 56, height: H,
-          background: C.blue3, border: "2px solid " + C.blue4,
-          borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: C.text }} />
+      </div>}
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+
+        {/* Profil-søjle med varierende bredde */}
+        <div style={{ position: "relative", height: H, width: MAXW + 40,
+          flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+
+          {/* Terræn-linje */}
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0,
+            height: 3, background: C.text, zIndex: 10 }} />
+
+          {/* Tegn diameter-zoner som kontur */}
+          <svg width={MAXW + 40} height={H} style={{ position: "absolute", top: 0, left: 0 }}>
+            {diaZoner.length === 0 && (
+              <rect x={10} y={0} width={MAXW} height={H}
+                fill={C.blue3} stroke={C.blue4} strokeWidth={1} />
+            )}
+            {diaZoner.map((z, i) => {
+              const y1 = z.fra / maks * H;
+              const y2 = Math.min(z.til / maks * H, H);
+              const w  = Math.round(breddePct(z.dia) * MAXW);
+              const x  = Math.round((MAXW + 40 - w) / 2);
+              return (
+                <rect key={i} x={x} y={y1} width={w} height={y2 - y1}
+                  fill={C.blue3} stroke={C.blue4} strokeWidth={1} />
+              );
+            })}
+            {/* Diameter-skift linjer */}
+            {diaZoner.slice(0, -1).map((z, i) => {
+              const y = z.til / maks * H;
+              const w1 = Math.round(breddePct(z.dia) * MAXW);
+              const w2 = Math.round(breddePct(diaZoner[i+1]?.dia) * MAXW);
+              const x1 = Math.round((MAXW + 40 - w1) / 2);
+              const x2 = Math.round((MAXW + 40 - w2) / 2);
+              return (
+                <g key={"line"+i}>
+                  <line x1={x1} y1={y} x2={x2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
+                  <line x1={x1+w1} y1={y} x2={x2+w2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
+                  <text x={MAXW+42} y={y+4} fontSize={9} fill={C.blue}>Ø{diaZoner[i+1]?.dia}</text>
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* Lag-farver oven på profil-konturen */}
           {lag.map((l, i) => {
             if (l.fraDybde == null) return null;
             const mat = MATERIALER.find(m => m.id === l.material);
-            return <div key={i} style={{
-              position: "absolute", left: 0, right: 0,
-              top: (l.fraDybde / maks * H) + "px",
-              height: Math.max(l.tykkelse / maks * H, 2) + "px",
-              background: mat?.farve || "#ccc",
-              borderBottom: "1px solid rgba(0,0,0,0.1)",
-            }} />;
+            // Brug subLag til at tegne korrekt bredde pr. sub-interval
+            const subs = l.subLag && l.subLag.length > 0 ? l.subLag : [{ fra: l.fraDybde, til: l.tilDybde, dia: parseFloat(l.diaMm) || maksDia }];
+            return subs.map((s, si) => {
+              const y  = s.fra / maks * H;
+              const h2 = Math.max((s.til - s.fra) / maks * H, 1.5);
+              const w  = Math.round(breddePct(s.dia) * MAXW) - 2;
+              const x  = Math.round((MAXW + 40 - w) / 2);
+              return (
+                <div key={i + "-" + si} style={{
+                  position: "absolute",
+                  top: y + "px", height: Math.max(h2, 2) + "px",
+                  left: x + "px", width: w + "px",
+                  background: (mat?.farve || "#ccc") + "cc",
+                  borderBottom: si < subs.length-1 ? "none" : "1px solid rgba(0,0,0,0.15)",
+                  zIndex: 5,
+                }} />
+              );
+            });
           })}
+
+          {/* Dybde-labels */}
+          {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+            <div key={frac} style={{ position: "absolute", left: 0, top: frac * H - 6,
+              fontSize: 9, color: C.text2, width: 24, textAlign: "right" }}>
+              {(frac * maks).toFixed(1)}
+            </div>
+          ))}
         </div>
-        <div style={{ flex: 1 }}>
+
+        {/* Legende */}
+        <div style={{ flex: 1, paddingTop: 4 }}>
           {lag.map((l, i) => {
             if (l.fraDybde == null) return null;
             const mat = MATERIALER.find(m => m.id === l.material);
-            return <div key={i} style={{ display: "flex", alignItems: "center",
-              gap: 8, marginBottom: 5, fontSize: 12 }}>
+            return <div key={i} style={{ display: "flex", alignItems: "flex-start",
+              gap: 8, marginBottom: 7, fontSize: 12 }}>
               <div style={{ width: 14, height: 14, background: mat?.farve || "#ccc",
-                borderRadius: 3, flexShrink: 0 }} />
-              <span style={{ color: C.text, fontWeight: 600 }}>{mat?.label}</span>
-              <span style={{ color: C.text2 }}>
-                {l.fraDybde.toFixed(2)}–{l.tilDybde.toFixed(2)} m · {l.kg} kg
-              </span>
+                borderRadius: 3, flexShrink: 0, marginTop: 1 }} />
+              <div>
+                <div style={{ color: C.text, fontWeight: 700 }}>{mat?.label}</div>
+                <div style={{ color: C.text2, fontSize: 11 }}>
+                  {l.fraDybde.toFixed(2)} – {l.tilDybde.toFixed(2)} m.u.t. · {l.kg} kg
+                  {l.diaStr && <span> · Ø {l.diaStr}</span>}
+                </div>
+              </div>
             </div>;
           })}
+          {/* Dybdeskala */}
+          <div style={{ marginTop: 12, fontSize: 10, color: C.text2,
+            borderTop: "1px solid " + C.blue4, paddingTop: 6 }}>
+            ▲ 0 m &nbsp;·&nbsp; ▼ {maks} m.u.t.
+            {forerSections?.length > 0 && <div>
+              {forerSections.map((fr, i) =>
+                <span key={i} style={{ marginRight: 8 }}>
+                  Forerør {fr.top}–{fr.bund} m: Ø{fr.dia} mm
+                </span>
+              )}
+            </div>}
+          </div>
         </div>
-      </div>
-      <div style={{ marginTop: 6, fontSize: 11, color: C.text2,
-        display: "flex", justifyContent: "space-between" }}>
-        <span>▲ Terræn (0 m)</span><span>▼ {maks} m.u.t.</span>
       </div>
     </div>
   );
@@ -575,13 +754,13 @@ function nyBoring() {
   return {
     id: uid(), dgu: "", type: "boring",
     bundpejling: "", rovandspejlFelt: "",
-    forerDiaFelt: "", forerDybdeFelt: "",
+    forerDiaFelt: "", forerBundFelt: "",
     filterDiaFelt: "", filterFraFelt: "", filterTilFelt: "",
     brondDia: "", brondDybde: "", noter: "",
     jupiterOk: false, jupiterAdresse: "",
     totaldybde: "", rovandspejl: "",
-    forerDia: "", forerDybde: "",
-    filterFra: "", filterTil: "", filterDia: "",
+    forerDia: "", forerBund: "", forerSections: [],
+    filterFra: "", filterTil: "", filterDia: "", filterSections: [],
     kommune: "", boreholeUrl: "", pdfUrl: "",
   };
 }
@@ -609,7 +788,10 @@ function App() {
   const primær = boringer[0];
   const bundpejling = primær.bundpejling ||
     (primær.type === "brønd" ? primær.brondDybde : primær.totaldybde) || null;
-  const beregnetLag = beregnLag(lag, bundpejling);
+  // Sørg for at forerSections/filterSections er tilgængelige
+  const forerSections  = primær.forerSections  || [];
+  const filterSections = primær.filterSections || [];
+  const beregnetLag = beregnLag(lag, bundpejling, primær);
 
   function download() {
     const html = buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej);
@@ -771,11 +953,15 @@ function App() {
               onFjern={() => setLag(prev => prev.filter((_, j) => j !== i))} />
           ))}
           <button style={btn("#34495e", { marginBottom: 16 })}
-            onClick={() => setLag(prev => [...prev,
-              { id: uid(), material: "stabilgrus", kg: "", diaMm: "" }])}>
-            + Tilføj lag
+            onClick={() => setLag(prev => [
+              { id: uid(), material: "stabilgrus", kg: "", diaMm: "" },
+              ...prev
+            ])}>
+            + Tilføj lag (øverst)
           </button>
-          <Profil lag={beregnetLag} bundpejling={bundpejling} />
+          <Profil lag={beregnetLag} bundpejling={bundpejling}
+            forerSections={primær.forerSections}
+            filterSections={primær.filterSections} />
           <div style={{ marginTop: 16 }}>
             <button style={btn()} onClick={() => setFane("grej")}>
               Næste: Grej →
