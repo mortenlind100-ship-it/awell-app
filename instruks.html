@@ -176,6 +176,26 @@ async function hentJupiter(dguNr) {
 }
 
 // ─── Word-dokument generator ──────────────────────────────────────────────────
+function buildProfilTabel(lag, bundpejling) {
+  const maks = parseFloat(bundpejling) || 1;
+  const gyldig = lag.filter(l => l.fraDybde != null);
+  if (gyldig.length === 0) return "";
+  const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
+  const matFarve = id => (MATERIALER.find(m => m.id === id) || {}).farve || "#ccc";
+
+  let celler1 = "";
+  let celler2 = "";
+  gyldig.forEach(l => {
+    const pct = ((l.tilDybde - l.fraDybde) / maks * 100).toFixed(1);
+    const farve = matFarve(l.material);
+    const navn  = (matLabel(l.material) || "").split(" ")[0];
+    celler1 += '<td style="background:' + farve + '; height:28pt; width:' + pct + '%; border:1px solid #fff; vertical-align:middle; text-align:center; font-size:8pt; color:#fff; font-weight:bold;">' + navn + "</td>";
+    celler2 += '<td style="width:' + pct + '%; font-size:8pt; text-align:center; color:#555; padding:2pt;">' + l.fraDybde.toFixed(1) + "–" + l.tilDybde.toFixed(1) + " m</td>";
+  });
+
+  return '<table style="width:100%; border-collapse:collapse; margin-bottom:10pt; font-size:9pt;"><tr>' + celler1 + "</tr><tr>" + celler2 + "</tr></table>";
+}
+
 function buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej) {
   const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
   const dato = projekt.datoFra
@@ -277,35 +297,7 @@ ${bo.noter ? `<div class="info">ℹ  ${bo.noter.replace(/\n/g, "<br>")}</div>` :
 
 <h2>3.  Sløjfningsprofil og sekvens</h2>
 <p>Materialer tilføres i nedenstående rækkefølge – <strong>fra bunden og op</strong>:</p>
-<table style="width:100%; border-collapse:collapse; margin-bottom:10pt; font-size:9pt;">
-  <tr>
-    ${beregnetLag.filter(l => l.fraDybde != null).map((l, i) => {
-      const mat = MATERIALER.find(m => m.id === l.material);
-      const h_pct = ((l.tilDybde - l.fraDybde) / parseFloat(bundpejling || 1) * 100).toFixed(1);
-      return \`<td style="background:\${mat?.farve||'#ccc'}; height:30pt; width:\${h_pct}%; border:1px solid #fff; vertical-align:middle; text-align:center; font-size:8pt; color:#fff; font-weight:bold;">\${mat?.label?.split(" ")[0]}</td>\`;
-    }).join("")}
-  </tr>
-  <tr>
-    ${beregnetLag.filter(l => l.fraDybde != null).map(l => {
-      const h_pct = ((l.tilDybde - l.fraDybde) / parseFloat(bundpejling || 1) * 100).toFixed(1);
-      return \`<td style="width:\${h_pct}%; font-size:8pt; text-align:center; color:#555; padding:2pt;">\${l.fraDybde.toFixed(1)}–\${l.tilDybde.toFixed(1)} m</td>\`;
-    }).join("")}
-  </tr>
-</table>
-<table>
-  <tr><th>#</th><th>Materiale</th><th>Fra (m.u.t.)</th><th>Til (m.u.t.)</th><th>Tykkelse (m)</th><th>Mængde (kg)</th></tr>
-  ${beregnetLag.map((l, i) => `
-  <tr>
-    <td style="text-align:center">${i+1}</td>
-    <td><strong>${matLabel(l.material)}</strong></td>
-    <td style="text-align:right">${l.fraDybde != null ? l.fraDybde.toFixed(2) : "–"}</td>
-    <td style="text-align:right">${l.tilDybde != null ? l.tilDybde.toFixed(2) : "–"}</td>
-    <td style="text-align:right">${l.tykkelse != null ? l.tykkelse.toFixed(2) : "–"}</td>
-    <td style="text-align:right;font-weight:bold">${l.kg || "–"}</td>
-  </tr>`).join("")}
-</table>
-<p><strong><em>HUSK: Tilfør vand undervejs efterhånden som bentonit kvæller.</em></strong></p>
-
+${buildProfilTabel(beregnetLag, bundpejling)}
 <h2>4.  Opgaven</h2>
 <ol>${defaultTasks.map(t => `<li>${t}</li>`).join("")}</ol>
 
