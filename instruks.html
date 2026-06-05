@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Awell – Arbejdsinstruks</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; }
+    body { background: #dce8f5; font-family: 'Open Sans', Arial, sans-serif; }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useRef } = React;
+
+// ─── Design tokens (matcher index.html) ──────────────────────────────────────
+const C = {
+  blue:    "#1169b0",
+  blue2:   "#1a7fcc",
+  blue3:   "#e8f2fb",
+  blue4:   "#b8d4ee",
+  blue5:   "#0d5490",
+  accent:  "#E8500A",
+  white:   "#fff",
+  grey0:   "#dce8f5",
+  grey1:   "#c8d6e8",
+  text:    "#1A2B3C",
+  text2:   "#4D6278",
+  red:     "#C0392B",
+  green:   "#1A7A4A",
+};
+
+// ─── Konstanter ───────────────────────────────────────────────────────────────
+const MATERIALER = [
+  { id: "bentonit_pellets", label: "Bentonit pellets",          kgPerL: 1.10, farve: "#6B8E23" },
+  { id: "bentonit_grout",   label: "Bentonit grout (flydende)", kgPerL: 1.10, farve: "#8B7355" },
+  { id: "cementgrout",      label: "Cementgrout",               kgPerL: 1.13, farve: "#A9A9A9" },
+  { id: "filtersand",       label: "Filtersand",                kgPerL: 1.55, farve: "#E8C84A" },
+  { id: "aertesten",        label: "Ærtesten / Grus",           kgPerL: 1.60, farve: "#D2B48C" },
+  { id: "stabilgrus",       label: "Stabilgrus",                kgPerL: 1.70, farve: "#C8B89A" },
+  { id: "brogrus",          label: "Brogrus",                   kgPerL: 1.65, farve: "#B8A898" },
+  { id: "muld",             label: "Muld / topjord",            kgPerL: 0.80, farve: "#5D4037" },
+  { id: "cement_stolpe",    label: "Stolpebeton / Støbemasse",  kgPerL: 1.13, farve: "#808080" },
+];
+
+const GREJ_STANDARD = [
+  "Lastbil", "Lille lastbil", "Minilæsser", "Minigraver (Loxam)",
+  "Gravemaskine", "Maskintrailer", "Kran / tre-ben",
+  "Støbeanlæg", "Blandeanlæg", "Honda generator", "Kuffertgenerator",
+  "SQ pumpe", "Lænsepumpe 2\"", "Palletank",
+  "Bundpejl", "Rovandspejl", "Bundpejl + rovandspejl",
+  "Vinkelsliber", "Bajonetsav", "Borehammer", "Kædesav",
+  "Trillebør", "Håndskovl", "Drænspade", "Rive", "Koben",
+  "Glas til vandprøve (2 stk)", "Slange + kobling til vand",
+  "Hjelm", "Høreværn og briller", "Blå overtrækssko",
+  "Mandhejs og sele", "Løftestropper", "Plastplader / køreplader",
+];
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function uid() { return Math.random().toString(36).slice(2, 9); }
+
+function beregnLag(lag, bundpejling) {
+  let dybde = parseFloat(bundpejling);
+  if (isNaN(dybde)) return lag.map(l => ({ ...l }));
+  return [...lag].reverse().map(l => {
+    const mat = MATERIALER.find(m => m.id === l.material);
+    const dia = parseFloat(l.diaMm);
+    const kg  = parseFloat(l.kg);
+    if (!mat || isNaN(dia) || dia <= 0 || isNaN(kg) || kg <= 0) {
+      return { ...l, fraDybde: null, tilDybde: null, tykkelse: null };
+    }
+    const r = dia / 2 / 1000;
+    const lpm = Math.PI * r * r * 1000;
+    const tykkelse = (kg / mat.kgPerL) / lpm;
+    const tilDybde = dybde;
+    const fraDybde = Math.max(0, dybde - tykkelse);
+    dybde = fraDybde;
+    return { ...l, fraDybde, tilDybde, tykkelse };
+  }).reverse();
+}
+
+// ─── Jupiter-kald (samme origin = ingen CORS) ─────────────────────────────────
+async function hentJupiter(dguNr) {
+  const clean = dguNr.trim().replace(/^DGU\s*/i, "").replace(/\s/g, "");
+  // /api/jupiter er på samme domæne (feltdata-v25.vercel.app) – ingen CORS
+  const resp = await fetch("/api/jupiter?dgu=" + encodeURIComponent(clean));
+  const json = await resp.json();
+  if (!resp.ok || json.error) throw new Error(json.error || "Boring ikke fundet");
+  const b = json.boring || {};
+  return {
+    dgu:         clean,
+    adresse:     b.adresse  || "",
+    kommune:     b.kommune  || "",
+    totaldybde:  b.dybde    || "",
+    rovandspejl: b.rovandstand      || "",
+    forerDia:    b.forerorDiameter  || "",
+    forerDybde:  b.forerorDybde     || "",
+    filterFra:   "",
+    filterTil:   "",
+    filterDia:   "",
+    borid:       b.boringsid    || "",
+    boreholeUrl: b.boreholeUrl  || "",
+    pdfUrl:      b.pdfUrl       || "",
+  };
+}
+
+// ─── Word-dokument generator ──────────────────────────────────────────────────
+function buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej) {
+  const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
+  const dato = projekt.datoFra
+    ? projekt.datoFra + (projekt.datoTil ? " – " + projekt.datoTil : "")
+    : "";
+
+  const typeLabel = t => ({ boring: "Boring", brønd: "Brønd", boring_med_brønd: "Boring + brønd" }[t] || t);
+
+  // Aggreger materialer
+  const aggr = {};
+  beregnetLag.forEach(l => {
+    const lbl = matLabel(l.material);
+    aggr[lbl] = (aggr[lbl] || 0) + (parseFloat(l.kg) || 0);
+  });
+
+  const allGrej = [...grej, ...friGrej.split("\n").map(s => s.trim()).filter(Boolean)];
+
+  const defaultTasks = [];
+  if (projekt.pumpeSkalTraekkes) defaultTasks.push("Adskil installation og træk pumpe og stigrør");
+  defaultTasks.push("Foretag bundpejling og registrér (m.u.t.)");
+  defaultTasks.push("Foretag rovandspejling og registrér (m.u.t.)");
+  if (projekt.artesisk) defaultTasks.push("⚠ Boring er artesisk – forhøj boring til min. 1 m over terræn inden sløjfning");
+  defaultTasks.push("Sløjf boring/brønd med materialer som angivet i sekvensen");
+  defaultTasks.push("Tilfør vand undervejs efterhånden som bentonit kvæller");
+  defaultTasks.push("Nedskær forerør til 1 m.u.t. og retablér terræn");
+  defaultTasks.push("Tag vandprøve – undgå beskidt overfladevand. Skriv DGU-nummer på prøve");
+  defaultTasks.push("Aflever vandprøve i firmaet");
+  defaultTasks.push("Tag dokumentationsbilleder som angivet");
+
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:w="urn:schemas-microsoft-com:office:word"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head><meta charset="UTF-8">
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: Arial, sans-serif; font-size: 11pt; color: #1A2B3C; }
+  h1 { font-size: 20pt; color: #1169b0; border-bottom: 3px solid #1169b0; padding-bottom: 6pt; margin-bottom: 4pt; }
+  h2 { font-size: 13pt; color: #1169b0; margin-top: 18pt; border-bottom: 1px solid #b8d4ee; padding-bottom: 3pt; margin-bottom: 8pt; }
+  h3 { font-size: 11pt; color: #1169b0; margin-top: 12pt; margin-bottom: 4pt; }
+  p { margin-bottom: 6pt; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 10pt; }
+  td, th { border: 1px solid #b8d4ee; padding: 5pt 8pt; vertical-align: top; }
+  th { background: #dce8f5; font-weight: bold; text-align: left; color: #1169b0; }
+  .lbl { background: #e8f2fb; font-weight: bold; width: 38%; }
+  ol { margin: 4pt 0 4pt 24pt; }
+  ul { margin: 4pt 0 4pt 24pt; }
+  li { margin-bottom: 4pt; }
+  .advarsel { background: #fde8e8; border-left: 4px solid #C0392B; padding: 8pt 12pt; margin: 10pt 0; font-weight: bold; color: #C0392B; }
+  .info { background: #e8f4e8; border-left: 4px solid #1A7A4A; padding: 6pt 10pt; margin: 6pt 0; font-size: 10pt; }
+  .footer { font-size: 9pt; color: #888; border-top: 1px solid #b8d4ee; margin-top: 24pt; padding-top: 6pt; }
+  .firma { font-size: 10pt; color: #888; margin-bottom: 2pt; }
+</style>
+</head>
+<body>
+<p class="firma">Awell Brøndboring A/S</p>
+<h1>ARBEJDSINSTRUKS – SLØJFNING</h1>
+<p><strong>${(projekt.sagsnummer ? projekt.sagsnummer + "  ·  " : "") + (projekt.titel || "Sløjfning")}</strong>${dato ? "  &nbsp;|&nbsp;  " + dato : ""}</p>
+
+${projekt.artesisk ? '<div class="advarsel">⚠  ARTESISK BORING – OVERTRYK. Boring skal forhøjes til min. 1 m over terræn inden sløjfning påbegyndes.</div>' : ""}
+
+<h2>1.  Opgaveoversigt</h2>
+<table>
+  <tr><td class="lbl">Sagsnummer</td><td>${projekt.sagsnummer || "–"}</td><td class="lbl">Titel</td><td>${projekt.titel || "–"}</td></tr>
+  <tr><td class="lbl">Adresse</td><td colspan="3">${projekt.adresse || "–"}</td></tr>
+  <tr><td class="lbl">Kontaktperson</td><td>${projekt.kontaktNavn || "–"}${projekt.kontaktTlf ? "  ·  tlf. " + projekt.kontaktTlf : ""}</td>
+      <td class="lbl">Grundejer</td><td>${projekt.grundejerNavn || "–"}${projekt.grundejerTlf ? "  ·  tlf. " + projekt.grundejerTlf : ""}</td></tr>
+  <tr><td class="lbl">DGU-numre</td><td>${boringer.map(b => b.dgu).filter(Boolean).join(", ") || "–"}</td>
+      <td class="lbl">Dato</td><td>${dato || "–"}</td></tr>
+</table>
+${projekt.opgaveBeskrivelse ? `<p><strong>Opgave:</strong> ${projekt.opgaveBeskrivelse.replace(/\n/g, "<br>")}</p>` : ""}
+${projekt.specialHensyn ? `<div class="info">ℹ  <strong>Særlige hensyn:</strong> ${projekt.specialHensyn.replace(/\n/g, "<br>")}</div>` : ""}
+
+<h2>2.  Boringer og brønde</h2>
+${boringer.map((bo, i) => {
+  const forerDia   = bo.forerDiaFelt   || bo.forerDia   || "–";
+  const forerDybde = bo.forerDybdeFelt || bo.forerDybde || "–";
+  const rovand     = bo.rovandspejlFelt || bo.rovandspejl || "–";
+  const dybde      = bo.bundpejling || bo.totaldybde || "–";
+  const filterFra  = bo.filterFraFelt  || bo.filterFra  || "–";
+  const filterTil  = bo.filterTilFelt  || bo.filterTil  || "–";
+  const filterDia  = bo.filterDiaFelt  || bo.filterDia  || "–";
+  const harBoring  = bo.type !== "brønd";
+  const harBrønd   = bo.type !== "boring";
+  return `
+<h3>${i+1}.  DGU ${bo.dgu || "–"}  ·  ${typeLabel(bo.type)}</h3>
+<table>
+  ${harBoring ? `
+  <tr><td class="lbl">Bundpejling (m.u.t.)</td><td>${dybde}</td><td class="lbl">Rovandspejl (m.u.t.)</td><td>${rovand}</td></tr>
+  <tr><td class="lbl">Forerør indv. Ø (mm)</td><td>${forerDia}</td><td class="lbl">Forerør dybde (m.u.t.)</td><td>${forerDybde}</td></tr>
+  <tr><td class="lbl">Filter Ø (mm)</td><td>${filterDia}</td><td class="lbl">Filter fra – til (m.u.t.)</td><td>${filterFra} – ${filterTil}</td></tr>
+  ` : ""}
+  ${harBrønd ? `
+  <tr><td class="lbl">Brønd indv. Ø (mm)</td><td>${bo.brondDia || "–"}</td><td class="lbl">Brønd dybde (m.u.t.)</td><td>${bo.brondDybde || "–"}</td></tr>
+  ` : ""}
+  ${bo.kommune ? `<tr><td class="lbl">Kommune (Jupiter)</td><td colspan="3">${bo.kommune}</td></tr>` : ""}
+</table>
+${bo.noter ? `<div class="info">ℹ  ${bo.noter.replace(/\n/g, "<br>")}</div>` : ""}`;
+}).join("")}
+
+<h2>3.  Sløjfningssekvens</h2>
+<p>Materialer tilføres i nedenstående rækkefølge – <strong>fra bunden og op</strong>:</p>
+<table>
+  <tr><th>#</th><th>Materiale</th><th>Fra (m.u.t.)</th><th>Til (m.u.t.)</th><th>Tykkelse (m)</th><th>Mængde (kg)</th></tr>
+  ${beregnetLag.map((l, i) => `
+  <tr>
+    <td style="text-align:center">${i+1}</td>
+    <td><strong>${matLabel(l.material)}</strong></td>
+    <td style="text-align:right">${l.fraDybde != null ? l.fraDybde.toFixed(2) : "–"}</td>
+    <td style="text-align:right">${l.tilDybde != null ? l.tilDybde.toFixed(2) : "–"}</td>
+    <td style="text-align:right">${l.tykkelse != null ? l.tykkelse.toFixed(2) : "–"}</td>
+    <td style="text-align:right;font-weight:bold">${l.kg || "–"}</td>
+  </tr>`).join("")}
+</table>
+<p><strong><em>HUSK: Tilfør vand undervejs efterhånden som bentonit kvæller.</em></strong></p>
+
+<h2>4.  Opgaven</h2>
+<ol>${defaultTasks.map(t => `<li>${t}</li>`).join("")}</ol>
+
+<h2>5.  Materialer og forventet forbrug</h2>
+<table>
+  <tr><th>Materiale</th><th>Forventet forbrug</th></tr>
+  ${Object.entries(aggr).map(([lbl, kg]) => `<tr><td>${lbl}</td><td style="text-align:right">${kg > 0 ? kg + " kg" : "–"}</td></tr>`).join("")}
+</table>
+
+${allGrej.length > 0 ? `
+<h2>6.  Grej</h2>
+<ul>${allGrej.map(e => `<li>${e}</li>`).join("")}</ul>
+` : ""}
+
+<h2>${allGrej.length > 0 ? "7" : "6"}.  Dokumentation</h2>
+<ul>${(projekt.dokumentation || "").split("\n").filter(Boolean).map(d => `<li>${d.replace(/^[-•]\s*/, "")}</li>`).join("")}</ul>
+
+<p class="footer">Awell Brøndboring A/S  ·  Arbejdsinstruks genereret ${new Date().toLocaleDateString("da-DK")}</p>
+</body></html>`;
+}
+
+function downloadWord(html, sagsnummer) {
+  const blob = new Blob(["\ufeff" + html], { type: "application/msword; charset=utf-8" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = "Arbejdsinstruks_" + (sagsnummer || "sloejfning") + ".doc";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── UI primitiver ────────────────────────────────────────────────────────────
+const inp = {
+  width: "100%", padding: "8px 10px", border: "1px solid " + C.blue4,
+  borderRadius: 7, fontSize: 13, fontFamily: "inherit",
+  background: C.white, color: C.text, outline: "none",
+};
+const ta = { ...inp, resize: "vertical", minHeight: 72 };
+const lbl = {
+  display: "block", fontSize: 11, fontWeight: 700, color: C.text2,
+  marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.4px",
+  fontFamily: "'Montserrat', sans-serif",
+};
+const btn = (bg, extra) => ({
+  padding: "9px 20px", background: bg || C.blue, color: C.white,
+  border: "none", borderRadius: 8, cursor: "pointer",
+  fontSize: 13, fontWeight: 700, fontFamily: "'Montserrat', sans-serif",
+  ...(extra || {}),
+});
+
+function F({ label, hint, children, col2 }) {
+  return (
+    <div style={{ marginBottom: 13, gridColumn: col2 ? "span 2" : "span 1" }}>
+      {label && <label style={lbl}>{label}</label>}
+      {children}
+      {hint && <div style={{ fontSize: 11, color: C.grey3, marginTop: 2 }}>{hint}</div>}
+    </div>
+  );
+}
+
+function Sekt({ n, title, icon }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10,
+      borderBottom: "2px solid " + C.blue, paddingBottom: 7, marginBottom: 18 }}>
+      {icon && <span style={{ fontSize: 18 }}>{icon}</span>}
+      <h3 style={{ margin: 0, fontFamily: "'Montserrat', sans-serif",
+        color: C.blue, fontSize: 15, fontWeight: 800 }}>
+        {n && n + ".  "}{title}
+      </h3>
+    </div>
+  );
+}
+
+// ─── Boring-kort ──────────────────────────────────────────────────────────────
+function BoringKort({ b, i, onChange, onFjern }) {
+  const [lader, setLader] = useState(false);
+  const [fejl,  setFejl]  = useState(null);
+  const upd = (k, v) => onChange({ ...b, [k]: v });
+
+  async function slaa() {
+    if (!b.dgu) return;
+    setLader(true); setFejl(null);
+    try {
+      const d = await hentJupiter(b.dgu);
+      onChange({
+        ...b,
+        jupiterOk:   true,
+        jupiterAdresse: d.adresse,
+        totaldybde:  d.totaldybde  || b.totaldybde,
+        rovandspejl: d.rovandspejl || b.rovandspejl,
+        forerDia:    d.forerDia    || b.forerDia,
+        forerDybde:  d.forerDybde  || b.forerDybde,
+        filterFra:   d.filterFra   || b.filterFra,
+        filterTil:   d.filterTil   || b.filterTil,
+        filterDia:   d.filterDia   || b.filterDia,
+        kommune:     d.kommune     || b.kommune,
+        boreholeUrl: d.boreholeUrl,
+        pdfUrl:      d.pdfUrl,
+      });
+    } catch (e) { setFejl(e.message); }
+    setLader(false);
+  }
+
+  const harBoring = b.type !== "brønd";
+  const harBrønd  = b.type !== "boring";
+
+  return (
+    <div style={{ background: C.blue3, border: "1px solid " + C.blue4,
+      borderRadius: 10, padding: 16, marginBottom: 14 }}>
+
+      <div style={{ display: "flex", justifyContent: "space-between",
+        alignItems: "center", marginBottom: 12 }}>
+        <strong style={{ color: C.blue, fontFamily: "'Montserrat', sans-serif", fontSize: 14 }}>
+          {i === 0 ? "Primær boring / brønd" : "Boring " + (i + 1)}
+        </strong>
+        {i > 0 && <button onClick={onFjern}
+          style={{ background: "none", border: "none", cursor: "pointer",
+            color: C.red, fontSize: 20, lineHeight: 1 }}>✕</button>}
+      </div>
+
+      {/* DGU + Jupiter */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label style={lbl}>DGU nummer</label>
+          <input style={inp} placeholder="f.eks. 207.183"
+            value={b.dgu} onChange={e => upd("dgu", e.target.value)}
+            onKeyDown={e => e.key === "Enter" && slaa()} />
+        </div>
+        <div style={{ alignSelf: "flex-end" }}>
+          <button onClick={slaa} disabled={lader || !b.dgu}
+            style={btn(b.jupiterOk ? C.green : C.blue, {
+              opacity: lader ? 0.6 : 1, minWidth: 110, padding: "9px 14px" })}>
+            {lader ? "Henter…" : b.jupiterOk ? "✓ Jupiter" : "🔍 Jupiter"}
+          </button>
+        </div>
+      </div>
+
+      {fejl && <div style={{ background: "#fde8e8", borderRadius: 6, padding: "7px 12px",
+        fontSize: 12, color: C.red, marginBottom: 10,
+        border: "1px solid #f5c6c6" }}>{fejl}</div>}
+
+      {b.jupiterOk && <div style={{ background: "#e8f4e8", borderRadius: 6,
+        padding: "7px 12px", fontSize: 12, color: C.green, marginBottom: 10,
+        border: "1px solid #a8d8a8" }}>
+        ✓ Data hentet fra Jupiter
+        {b.jupiterAdresse ? " · " + b.jupiterAdresse : ""}
+        {b.kommune ? " · " + b.kommune : ""}
+        {b.boreholeUrl && <a href={b.boreholeUrl} target="_blank"
+          style={{ marginLeft: 10, color: C.blue, fontSize: 11 }}>
+          🔗 Borerapport
+        </a>}
+      </div>}
+
+      {/* Type */}
+      <div style={{ marginBottom: 12 }}>
+        <label style={lbl}>Type</label>
+        <select style={inp} value={b.type} onChange={e => upd("type", e.target.value)}>
+          <option value="boring">Boring (forerør + filter)</option>
+          <option value="brønd">Brønd / muret brønd</option>
+          <option value="boring_med_brønd">Boring med brønd ovenpå</option>
+        </select>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        <div style={{ marginBottom: 10 }}>
+          <label style={lbl}>Bundpejling (m.u.t.)</label>
+          <input style={inp} type="number" step="0.01"
+            placeholder={b.totaldybde || "f.eks. 34.0"}
+            value={b.bundpejling} onChange={e => upd("bundpejling", e.target.value)} />
+          {b.totaldybde && !b.bundpejling &&
+            <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>Jupiter: {b.totaldybde} m</div>}
+        </div>
+        <div style={{ marginBottom: 10 }}>
+          <label style={lbl}>Rovandspejl (m.u.t.)</label>
+          <input style={inp} type="number" step="0.01"
+            placeholder={b.rovandspejl || ""}
+            value={b.rovandspejlFelt} onChange={e => upd("rovandspejlFelt", e.target.value)} />
+        </div>
+
+        {harBoring && <>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Forerør indv. Ø (mm)</label>
+            <input style={inp} type="number"
+              placeholder={b.forerDia || "f.eks. 203"}
+              value={b.forerDiaFelt} onChange={e => upd("forerDiaFelt", e.target.value)} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Forerør dybde (m.u.t.)</label>
+            <input style={inp} type="number" step="0.01"
+              placeholder={b.forerDybde || ""}
+              value={b.forerDybdeFelt} onChange={e => upd("forerDybdeFelt", e.target.value)} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Filter Ø (mm)</label>
+            <input style={inp} type="number"
+              placeholder={b.filterDia || "f.eks. 125"}
+              value={b.filterDiaFelt} onChange={e => upd("filterDiaFelt", e.target.value)} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Filter fra – til (m.u.t.)</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input style={{ ...inp, flex: 1 }} type="number" step="0.01"
+                placeholder={b.filterFra || "fra"}
+                value={b.filterFraFelt} onChange={e => upd("filterFraFelt", e.target.value)} />
+              <input style={{ ...inp, flex: 1 }} type="number" step="0.01"
+                placeholder={b.filterTil || "til"}
+                value={b.filterTilFelt} onChange={e => upd("filterTilFelt", e.target.value)} />
+            </div>
+          </div>
+        </>}
+
+        {harBrønd && <>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Brønd indv. Ø (mm)</label>
+            <input style={inp} type="number"
+              placeholder="f.eks. 1000"
+              value={b.brondDia} onChange={e => upd("brondDia", e.target.value)} />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <label style={lbl}>Brønd dybde (m.u.t.)</label>
+            <input style={inp} type="number" step="0.01"
+              placeholder="f.eks. 4.8"
+              value={b.brondDybde} onChange={e => upd("brondDybde", e.target.value)} />
+          </div>
+        </>}
+      </div>
+
+      <div>
+        <label style={lbl}>Bemærkninger til denne boring</label>
+        <textarea style={{ ...ta, minHeight: 56 }}
+          placeholder="F.eks. artesisk, adgangsforhold, pumpe skal trækkes..."
+          value={b.noter} onChange={e => upd("noter", e.target.value)} />
+      </div>
+    </div>
+  );
+}
+
+// ─── Lag-række ────────────────────────────────────────────────────────────────
+function LagRaekke({ lag, i, onChange, onFjern, calc }) {
+  const upd = (k, v) => onChange({ ...lag, [k]: v });
+  const mat = MATERIALER.find(m => m.id === lag.material);
+  return (
+    <div style={{ background: C.white, border: "1px solid " + C.blue4,
+      borderRadius: 8, padding: 14, marginBottom: 10,
+      borderLeft: "5px solid " + (mat?.farve || "#ccc") }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ background: mat?.farve || "#888", color: C.white, borderRadius: "50%",
+          width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
+        <span style={{ fontWeight: 700, color: C.text, flex: 1, fontSize: 13,
+          fontFamily: "'Montserrat', sans-serif" }}>{mat?.label || "–"}</span>
+        {i > 0 && <button onClick={onFjern}
+          style={{ background: "none", border: "none", cursor: "pointer",
+            color: C.red, fontSize: 18, lineHeight: 1 }}>✕</button>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "0 12px" }}>
+        <div>
+          <label style={lbl}>Materiale</label>
+          <select style={inp} value={lag.material} onChange={e => upd("material", e.target.value)}>
+            {MATERIALER.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>Mængde (kg)</label>
+          <input style={inp} type="number" step="10"
+            value={lag.kg} onChange={e => upd("kg", e.target.value)} placeholder="kg" />
+          {mat && <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>{mat.kgPerL} kg/L</div>}
+        </div>
+        <div>
+          <label style={lbl}>Ø (mm)</label>
+          <input style={inp} type="number" step="1"
+            value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)} placeholder="mm" />
+        </div>
+      </div>
+      {calc?.fraDybde != null && (
+        <div style={{ marginTop: 8, background: C.blue3, borderRadius: 5,
+          padding: "5px 10px", fontSize: 12, color: C.blue, fontWeight: 600 }}>
+          📏 {calc.fraDybde.toFixed(2)} – {calc.tilDybde.toFixed(2)} m.u.t.
+          &nbsp;·&nbsp; {calc.tykkelse.toFixed(2)} m tykkelse
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Profil-visualisering ─────────────────────────────────────────────────────
+function Profil({ lag, bundpejling }) {
+  const maks = parseFloat(bundpejling);
+  if (!bundpejling || isNaN(maks) || maks <= 0) return null;
+  if (!lag.some(l => l.fraDybde != null)) return null;
+  const H = 220;
+  return (
+    <div style={{ background: C.white, border: "1px solid " + C.blue4,
+      borderRadius: 8, padding: 16, marginTop: 16 }}>
+      <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
+        color: C.blue, fontSize: 13, marginBottom: 12 }}>
+        📊 Sløjfningsprofil
+      </div>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
+        <div style={{ position: "relative", width: 56, height: H,
+          background: C.blue3, border: "2px solid " + C.blue4,
+          borderRadius: 4, overflow: "hidden", flexShrink: 0 }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: C.text }} />
+          {lag.map((l, i) => {
+            if (l.fraDybde == null) return null;
+            const mat = MATERIALER.find(m => m.id === l.material);
+            return <div key={i} style={{
+              position: "absolute", left: 0, right: 0,
+              top: (l.fraDybde / maks * H) + "px",
+              height: Math.max(l.tykkelse / maks * H, 2) + "px",
+              background: mat?.farve || "#ccc",
+              borderBottom: "1px solid rgba(0,0,0,0.1)",
+            }} />;
+          })}
+        </div>
+        <div style={{ flex: 1 }}>
+          {lag.map((l, i) => {
+            if (l.fraDybde == null) return null;
+            const mat = MATERIALER.find(m => m.id === l.material);
+            return <div key={i} style={{ display: "flex", alignItems: "center",
+              gap: 8, marginBottom: 5, fontSize: 12 }}>
+              <div style={{ width: 14, height: 14, background: mat?.farve || "#ccc",
+                borderRadius: 3, flexShrink: 0 }} />
+              <span style={{ color: C.text, fontWeight: 600 }}>{mat?.label}</span>
+              <span style={{ color: C.text2 }}>
+                {l.fraDybde.toFixed(2)}–{l.tilDybde.toFixed(2)} m · {l.kg} kg
+              </span>
+            </div>;
+          })}
+        </div>
+      </div>
+      <div style={{ marginTop: 6, fontSize: 11, color: C.text2,
+        display: "flex", justifyContent: "space-between" }}>
+        <span>▲ Terræn (0 m)</span><span>▼ {maks} m.u.t.</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Hoved-app ────────────────────────────────────────────────────────────────
+function nyBoring() {
+  return {
+    id: uid(), dgu: "", type: "boring",
+    bundpejling: "", rovandspejlFelt: "",
+    forerDiaFelt: "", forerDybdeFelt: "",
+    filterDiaFelt: "", filterFraFelt: "", filterTilFelt: "",
+    brondDia: "", brondDybde: "", noter: "",
+    jupiterOk: false, jupiterAdresse: "",
+    totaldybde: "", rovandspejl: "",
+    forerDia: "", forerDybde: "",
+    filterFra: "", filterTil: "", filterDia: "",
+    kommune: "", boreholeUrl: "", pdfUrl: "",
+  };
+}
+
+function App() {
+  const [fane, setFane] = useState("projekt");
+
+  const [projekt, setProjekt] = useState({
+    sagsnummer: "", titel: "", adresse: "",
+    kontaktNavn: "", kontaktTlf: "",
+    grundejerNavn: "", grundejerTlf: "",
+    datoFra: "", datoTil: "",
+    artesisk: false, pumpeSkalTraekkes: false,
+    opgaveBeskrivelse: "", specialHensyn: "",
+    dokumentation: "Tag billeder undervejs af sløjfningsarbejdet\nTag billeder af adgangsvej / kørevej\nRegistrér bundpejling og rovandspejl for hver boring\nRegistrér forbrug af materialer",
+  });
+
+  const [boringer, setBoringer] = useState([nyBoring()]);
+  const [lag, setLag] = useState([{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }]);
+  const [grej, setGrej] = useState([]);
+  const [friGrej, setFriGrej] = useState("");
+
+  const updP = (k, v) => setProjekt(p => ({ ...p, [k]: v }));
+
+  const primær = boringer[0];
+  const bundpejling = primær.bundpejling ||
+    (primær.type === "brønd" ? primær.brondDybde : primær.totaldybde) || null;
+  const beregnetLag = beregnLag(lag, bundpejling);
+
+  function download() {
+    const html = buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej);
+    downloadWord(html, projekt.sagsnummer);
+  }
+
+  const faner = [
+    { id: "projekt",    label: "📋 Projekt"   },
+    { id: "boringer",   label: "⛏️ Boringer"  },
+    { id: "sloejfning", label: "🪣 Sløjfning" },
+    { id: "grej",       label: "🔧 Grej"       },
+    { id: "generer",    label: "📄 Generer"    },
+  ];
+
+  return (
+    <div style={{ fontFamily: "'Open Sans', Arial, sans-serif",
+      background: C.grey0, minHeight: "100vh" }}>
+
+      {/* Header */}
+      <div style={{ background: "linear-gradient(135deg, " + C.blue5 + " 0%, " + C.blue + " 100%)",
+        padding: "13px 20px", display: "flex", alignItems: "center", gap: 14,
+        boxShadow: "0 2px 10px rgba(0,0,0,0.18)" }}>
+        <a href="/" style={{ textDecoration: "none" }}>
+          <div style={{ background: C.white, borderRadius: 8, padding: "5px 11px",
+            fontFamily: "'Montserrat', sans-serif", fontWeight: 900, fontSize: 16,
+            color: C.blue, letterSpacing: 1.5 }}>AWELL</div>
+        </a>
+        <div>
+          <div style={{ color: C.white, fontFamily: "'Montserrat', sans-serif",
+            fontWeight: 800, fontSize: 15 }}>Arbejdsinstruks Generator</div>
+          <div style={{ color: C.blue4, fontSize: 11, marginTop: 1 }}>
+            Sløjfning af boringer og brønde
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ background: C.white, borderBottom: "2px solid " + C.blue4,
+        display: "flex", overflowX: "auto" }}>
+        {faner.map(f => (
+          <button key={f.id} onClick={() => setFane(f.id)}
+            style={{ padding: "11px 16px", border: "none", background: "none",
+              cursor: "pointer", fontFamily: "'Montserrat', sans-serif",
+              fontSize: 13, fontWeight: fane === f.id ? 800 : 500,
+              color: fane === f.id ? C.blue : C.text2,
+              borderBottom: fane === f.id ? "3px solid " + C.blue : "3px solid transparent",
+              marginBottom: -2, whiteSpace: "nowrap" }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Indhold */}
+      <div style={{ maxWidth: 820, margin: "0 auto", padding: "24px 16px 60px" }}>
+
+        {/* ── PROJEKT ─────────────────────────────────────────────────────── */}
+        {fane === "projekt" && <>
+          <Sekt n="1" title="Projektinformation" icon="📋" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
+            <F label="Sagsnummer"><input style={inp} value={projekt.sagsnummer}
+              onChange={e => updP("sagsnummer", e.target.value)} placeholder="f.eks. 20710" /></F>
+            <F label="Titel / projekt"><input style={inp} value={projekt.titel}
+              onChange={e => updP("titel", e.target.value)} placeholder="f.eks. Egedal grundvandspulje" /></F>
+          </div>
+          <F label="Adresse" col2><input style={inp} value={projekt.adresse}
+            onChange={e => updP("adresse", e.target.value)}
+            placeholder="f.eks. Hagerupvej 7b, 3650 Ølstykke" /></F>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
+            <F label="Dato fra"><input style={inp} type="date" value={projekt.datoFra}
+              onChange={e => updP("datoFra", e.target.value)} /></F>
+            <F label="Dato til"><input style={inp} type="date" value={projekt.datoTil}
+              onChange={e => updP("datoTil", e.target.value)} /></F>
+            <F label="Kontaktperson navn"><input style={inp} value={projekt.kontaktNavn}
+              onChange={e => updP("kontaktNavn", e.target.value)} /></F>
+            <F label="Kontaktperson tlf"><input style={inp} value={projekt.kontaktTlf}
+              onChange={e => updP("kontaktTlf", e.target.value)} placeholder="93 89 89 04" /></F>
+            <F label="Grundejer navn"><input style={inp} value={projekt.grundejerNavn}
+              onChange={e => updP("grundejerNavn", e.target.value)} /></F>
+            <F label="Grundejer tlf"><input style={inp} value={projekt.grundejerTlf}
+              onChange={e => updP("grundejerTlf", e.target.value)} /></F>
+          </div>
+          <div style={{ display: "flex", gap: 24, margin: "12px 0 16px",
+            padding: "12px 16px", background: "#fff8e1", borderRadius: 8,
+            border: "1px solid #ffe082" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+              fontSize: 13, fontWeight: 700,
+              color: projekt.artesisk ? C.red : C.text }}>
+              <input type="checkbox" checked={projekt.artesisk}
+                onChange={e => updP("artesisk", e.target.checked)} />
+              ⚠️ Artesisk boring
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 8,
+              cursor: "pointer", fontSize: 13, fontWeight: 700, color: C.text }}>
+              <input type="checkbox" checked={projekt.pumpeSkalTraekkes}
+                onChange={e => updP("pumpeSkalTraekkes", e.target.checked)} />
+              Pumpe skal trækkes
+            </label>
+          </div>
+          <F label="Opgavebeskrivelse" col2>
+            <textarea style={{ ...ta, minHeight: 80 }} value={projekt.opgaveBeskrivelse}
+              onChange={e => updP("opgaveBeskrivelse", e.target.value)}
+              placeholder="Kort beskrivelse..." />
+          </F>
+          <F label="Særlige hensyn / adgangsforhold" col2>
+            <textarea style={ta} value={projekt.specialHensyn}
+              onChange={e => updP("specialHensyn", e.target.value)}
+              placeholder="Smal kørevej, boring under tag, besøgstider..." />
+          </F>
+          <F label="Dokumentationskrav (ét krav pr. linje)" col2>
+            <textarea style={ta} value={projekt.dokumentation}
+              onChange={e => updP("dokumentation", e.target.value)} />
+          </F>
+          <button style={btn()} onClick={() => setFane("boringer")}>
+            Næste: Boringer →
+          </button>
+        </>}
+
+        {/* ── BORINGER ────────────────────────────────────────────────────── */}
+        {fane === "boringer" && <>
+          <Sekt n="2" title="Boringer og brønde" icon="⛏️" />
+          <p style={{ fontSize: 13, color: C.text2, marginBottom: 18, lineHeight: 1.6 }}>
+            Angiv boringer/brønde der skal sløjfes. Brug <strong>🔍 Jupiter</strong>-knappen
+            til at hente dimensionsdata automatisk fra GEUS.
+          </p>
+          {boringer.map((b, i) => (
+            <BoringKort key={b.id} b={b} i={i}
+              onChange={upd => setBoringer(prev => prev.map((x, j) => j === i ? upd : x))}
+              onFjern={() => setBoringer(prev => prev.filter((_, j) => j !== i))} />
+          ))}
+          <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+            <button style={btn("#34495e")}
+              onClick={() => setBoringer(prev => [...prev, nyBoring()])}>
+              + Tilføj boring / brønd
+            </button>
+            <button style={{ ...btn(), marginLeft: "auto" }}
+              onClick={() => setFane("sloejfning")}>
+              Næste: Sløjfning →
+            </button>
+          </div>
+        </>}
+
+        {/* ── SLØJFNING ───────────────────────────────────────────────────── */}
+        {fane === "sloejfning" && <>
+          <Sekt n="3" title="Sløjfningssekvens og materialer" icon="🪣" />
+          <p style={{ fontSize: 13, color: C.text2, marginBottom: 10, lineHeight: 1.6 }}>
+            Angiv materialer <strong>fra bunden og op</strong> (lag 1 = nederst).
+            Dybder beregnes automatisk ud fra bundpejling og diameter.
+          </p>
+          {!bundpejling && (
+            <div style={{ background: "#fff8e1", border: "1px solid #ffe082",
+              borderRadius: 8, padding: "10px 14px", fontSize: 13,
+              color: "#8d6e00", marginBottom: 14 }}>
+              💡 Angiv bundpejling på den primære boring for automatisk dybdeberegning.
+            </div>
+          )}
+          {beregnetLag.map((l, i) => (
+            <LagRaekke key={l.id} lag={l} i={i} calc={beregnetLag[i]}
+              onChange={upd => setLag(prev => prev.map((x, j) => j === i ? upd : x))}
+              onFjern={() => setLag(prev => prev.filter((_, j) => j !== i))} />
+          ))}
+          <button style={btn("#34495e", { marginBottom: 16 })}
+            onClick={() => setLag(prev => [...prev,
+              { id: uid(), material: "stabilgrus", kg: "", diaMm: "" }])}>
+            + Tilføj lag
+          </button>
+          <Profil lag={beregnetLag} bundpejling={bundpejling} />
+          <div style={{ marginTop: 16 }}>
+            <button style={btn()} onClick={() => setFane("grej")}>
+              Næste: Grej →
+            </button>
+          </div>
+        </>}
+
+        {/* ── GREJ ────────────────────────────────────────────────────────── */}
+        {fane === "grej" && <>
+          <Sekt n="4" title="Grej og udstyr" icon="🔧" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
+            {GREJ_STANDARD.map(e => {
+              const aktiv = grej.includes(e);
+              return (
+                <label key={e} style={{ display: "flex", alignItems: "center", gap: 8,
+                  padding: "8px 12px", border: "1px solid " + (aktiv ? C.blue : C.blue4),
+                  borderRadius: 7, cursor: "pointer",
+                  background: aktiv ? C.blue3 : C.white,
+                  fontSize: 12, fontWeight: aktiv ? 700 : 400 }}>
+                  <input type="checkbox" checked={aktiv} onChange={() =>
+                    setGrej(prev => aktiv ? prev.filter(x => x !== e) : [...prev, e])} />
+                  {e}
+                </label>
+              );
+            })}
+          </div>
+          <F label="Fritekst-grej (ét styk pr. linje)" col2>
+            <textarea style={ta} value={friGrej}
+              onChange={e => setFriGrej(e.target.value)}
+              placeholder="F.eks. 2 bigbags bentonit pellets á 500 kg..." />
+          </F>
+          <button style={btn()} onClick={() => setFane("generer")}>
+            Næste: Generer →
+          </button>
+        </>}
+
+        {/* ── GENERER ─────────────────────────────────────────────────────── */}
+        {fane === "generer" && <>
+          <Sekt n="5" title="Generer arbejdsinstruks" icon="📄" />
+
+          {/* Opsummering */}
+          <div style={{ background: C.white, border: "1px solid " + C.blue4,
+            borderRadius: 10, padding: 20, marginBottom: 20 }}>
+            <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 800,
+              fontSize: 16, color: C.blue, borderBottom: "2px solid " + C.blue,
+              paddingBottom: 8, marginBottom: 12 }}>
+              ARBEJDSINSTRUKS – SLØJFNING
+            </div>
+            <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+              <tbody>
+                {[
+                  ["Sagsnummer", projekt.sagsnummer || "–"],
+                  ["Adresse", projekt.adresse || "–"],
+                  ["Kontakt", (projekt.kontaktNavn || "–") + (projekt.kontaktTlf ? " · " + projekt.kontaktTlf : "")],
+                  ["Boringer", boringer.map(b => b.dgu || "ingen DGU").join(", ")],
+                  ["Sløjfningslag", beregnetLag.length + " lag · " + beregnetLag.reduce((s, l) => s + (parseFloat(l.kg) || 0), 0) + " kg total"],
+                  ["Grej", (grej.length + friGrej.split("\n").filter(Boolean).length) + " poster"],
+                ].map(([k, v]) => (
+                  <tr key={k}>
+                    <td style={{ padding: "4px 0", color: C.text2, width: 130, fontSize: 12 }}>{k}</td>
+                    <td style={{ padding: "4px 0", fontWeight: 600 }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <button onClick={download}
+            style={{ ...btn(), width: "100%", padding: 16, fontSize: 16,
+              boxShadow: "0 3px 12px rgba(17,105,176,0.3)" }}>
+            📄 Download arbejdsinstruks (.doc)
+          </button>
+          <p style={{ fontSize: 12, color: C.text2, textAlign: "center", marginTop: 8 }}>
+            Åbnes i Microsoft Word eller LibreOffice
+          </p>
+        </>}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
