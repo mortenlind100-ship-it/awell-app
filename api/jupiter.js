@@ -148,17 +148,56 @@ module.exports = async (req, res) => {
     const h = boreholeHtml;
 
     // Extract structured data using regex patterns common in Danish government HTML
+    // ── Boringsopbygning: Forerør (Diameter + Bund) ──────────────────────────
+    // Tabel under "Boringsopbygning" / "Forerør" – kolonner: Top, Bund, Diameter, ...
+    const forerRows = scrapeTable(h, "Forerør");
+    // Find rækker med numeriske værdier; kolonner er typisk: Top | Bund | Diameter
+    const forerData = forerRows.filter(r => r.length >= 2 && r.some(c => /^[\d.,]+$/.test(c)));
+    // Hent alle forerørssektioner (kan være flere)
+    const forerSections = forerData.map(r => {
+      // Find tal i rækkefølge: Top, Bund, Diameter
+      const nums = r.map(c => c.replace(",",".")).filter(c => /^[\d.]+$/.test(c));
+      return { top: parseFloat(nums[0])||0, bund: parseFloat(nums[1])||0, dia: parseFloat(nums[2])||0 };
+    }).filter(s => s.dia > 0 && s.bund > 0);
+
+    // ── Boringsopbygning: Filter (Fra, Til, Diameter) ─────────────────────────
+    const filterRows = scrapeTable(h, "Filter");
+    const filterData = filterRows.filter(r => r.length >= 2 && r.some(c => /^[\d.,]+$/.test(c)));
+    const filterSections = filterData.map(r => {
+      const nums = r.map(c => c.replace(",",".")).filter(c => /^[\d.]+$/.test(c));
+      return { fra: parseFloat(nums[0])||0, til: parseFloat(nums[1])||0, dia: parseFloat(nums[2])||0 };
+    }).filter(s => s.dia > 0);
+
+    // ── Vandstand: Seneste pejling ────────────────────────────────────────────
+    // vandstandFromHtml er allerede scraped: [{ dato, pejling, kote, maalerNavn }]
+    // Sortér efter dato faldende og tag seneste
+    const vandRows2 = scrapeTable(h, "Vandstand");
+    // Rækker: dato | pejling | kote | ...  – seneste er typisk øverst
+    const senestePejling = vandRows2
+      .filter(r => r.length >= 2 && r[0].match(/\d/) && r[1].match(/[\d.,]/))
+      .slice(0, 1)
+      .map(r => ({ dato: r[0].trim(), pejling: r[1].replace(",",".").trim() }))[0] || null;
+
     htmlData = {
-      dguNr:     h.match(/DGU[- ]?nr[.:]?\s*<[^>]+>\s*([\d.]+)/i)?.[1] || dgu,
+      dguNr:      h.match(/DGU[- ]?nr[.:]?\s*<[^>]+>\s*([\d.]+)/i)?.[1] || dgu,
       boringNavn: h.match(/Boringens navn[^<]*<[^>]+>\s*([^<]+)/i)?.[1]?.trim(),
-      ejer:      h.match(/Ejer[^<]*<[^>]+>\s*([^<]+)/i)?.[1]?.trim(),
-      journal:   h.match(/Journal[^<]*<[^>]+>\s*([^<]+)/i)?.[1]?.trim(),
-      boreDato:  h.match(/Bored[^<]*<[^>]+>\s*([\d.\-/]+)/i)?.[1]?.trim(),
-      dybde:     h.match(/[Tt]otal.*?dybde[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
-      forerDybde: h.match(/[Ff]orer.*?dybde[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
-      forerDiam:  h.match(/[Ff]orer.*?diameter[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
-      vandstand:  h.match(/[Rr]o.*?vandstand[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
+      ejer:       h.match(/Ejer[^<]*<[^>]+>\s*([^<]+)/i)?.[1]?.trim(),
+      journal:    h.match(/Journal[^<]*<[^>]+>\s*([^<]+)/i)?.[1]?.trim(),
+      boreDato:   h.match(/Bored[^<]*<[^>]+>\s*([\d.\-/]+)/i)?.[1]?.trim(),
+      dybde:      h.match(/[Tt]otal.*?dybde[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
       indvinding: h.match(/[Ii]ndvinding[^<]*<[^>]+>\s*([\d.,]+)/i)?.[1]?.trim(),
+      // Forerør – primær sektion (størst diameter / øverst)
+      forerDiam:  forerSections.length > 0 ? String(forerSections[0].dia) : null,
+      forerBund:  forerSections.length > 0 ? String(forerSections[0].bund) : null,
+      forerSections,   // alle sektioner til multi-diameter beregning
+      // Filter – primær sektion
+      filterDia:  filterSections.length > 0 ? String(filterSections[0].dia) : null,
+      filterFra:  filterSections.length > 0 ? String(filterSections[0].fra) : null,
+      filterTil:  filterSections.length > 0 ? String(filterSections[0].til) : null,
+      filterSections,  // alle filtersektioner
+      // Vandstand: seneste pejling
+      senestePejling,
+      rovandstand: senestePejling ? senestePejling.pejling : null,
     };
 
     // Scrape litologi table
@@ -248,9 +287,15 @@ module.exports = async (req, res) => {
       utmy:        utmy            || parseFloat(bf.yutm),
       kote:        bf.terraen_kote,
       dybde:       bf.dybde_num   || bf.dybde || htmlData.dybde,
-      forerorDybde: htmlData.forerDybde,
       forerorDiameter: htmlData.forerDiam,
-      rovandstand: htmlData.vandstand,
+      forerorBund:     htmlData.forerBund,
+      forerorSections: htmlData.forerSections || [],
+      filterDiameter:  htmlData.filterDia,
+      filterFra:       htmlData.filterFra,
+      filterTil:       htmlData.filterTil,
+      filterSections:  htmlData.filterSections || [],
+      rovandstand:     htmlData.rovandstand,
+      senestePejling:  htmlData.senestePejling,
       indvinding:  htmlData.indvinding,
       dataejer:    bf.dataejer,
       pdfUrl,
