@@ -148,35 +148,65 @@ module.exports = async (req, res) => {
     const h = boreholeHtml;
 
     // Extract structured data using regex patterns common in Danish government HTML
-    // ── Boringsopbygning: Forerør (Diameter + Bund) ──────────────────────────
-    // Tabel under "Boringsopbygning" / "Forerør" – kolonner: Top, Bund, Diameter, ...
+    // ── Header-bevidst kolonne-lookup ────────────────────────────────────────
+    // Returnerer et objekt { headers: [...], rows: [{kolonne: værdi}] }
+    // baseret på første række som header-række.
+    const parseTableByHeaders = (rows) => {
+      if (rows.length < 2) return { headers: [], rows: [] };
+      const headers = rows[0].map(h2 => h2.toLowerCase().replace(/[()]/g,"").trim());
+      const dataRows = rows.slice(1).filter(r => r.some(c => /\d/.test(c)));
+      return {
+        headers,
+        rows: dataRows.map(r => {
+          const obj = {};
+          headers.forEach((hdr, i) => { obj[hdr] = (r[i] || "").replace(",",".").trim(); });
+          return obj;
+        })
+      };
+    };
+
+    const colVal = (row, ...names) => {
+      for (const n of names) {
+        const key = Object.keys(row).find(k => k.includes(n.toLowerCase()));
+        if (key && row[key] && /\d/.test(row[key])) return parseFloat(row[key]) || 0;
+      }
+      return 0;
+    };
+
+    // ── Forerør: Top, Bund, Diameter ──────────────────────────────────────────
+    // Jupiter-kolonner: "Top (m)", "Bund (m)", "Materiale", "Diameter (mm)", "Indv. dia. (mm)"
     const forerRows = scrapeTable(h, "Forerør");
-    // Find rækker med numeriske værdier; kolonner er typisk: Top | Bund | Diameter
-    const forerData = forerRows.filter(r => r.length >= 2 && r.some(c => /^[\d.,]+$/.test(c)));
-    // Hent alle forerørssektioner (kan være flere)
-    const forerSections = forerData.map(r => {
-      // Find tal i rækkefølge: Top, Bund, Diameter
-      const nums = r.map(c => c.replace(",",".")).filter(c => /^[\d.]+$/.test(c));
-      return { top: parseFloat(nums[0])||0, bund: parseFloat(nums[1])||0, dia: parseFloat(nums[2])||0 };
-    }).filter(s => s.dia > 0 && s.bund > 0);
+    const forerParsed = parseTableByHeaders(forerRows);
+    const forerSections = forerParsed.rows.map(r => ({
+      top:  colVal(r, "top"),
+      bund: colVal(r, "bund"),
+      dia:  colVal(r, "indv", "diameter"),   // Indv. dia. foretrækkes, fallback til Diameter
+    })).filter(s => s.dia > 0 && s.bund > 0);
 
-    // ── Boringsopbygning: Filter (Fra, Til, Diameter) ─────────────────────────
+    // ── Filter: Top, Bund, Diameter ───────────────────────────────────────────
+    // Jupiter-kolonner: "Top (m)", "Bund (m)", "Materiale", "Diameter (mm)", "Indv. dia. (mm)"
     const filterRows = scrapeTable(h, "Filter");
-    const filterData = filterRows.filter(r => r.length >= 2 && r.some(c => /^[\d.,]+$/.test(c)));
-    const filterSections = filterData.map(r => {
-      const nums = r.map(c => c.replace(",",".")).filter(c => /^[\d.]+$/.test(c));
-      return { fra: parseFloat(nums[0])||0, til: parseFloat(nums[1])||0, dia: parseFloat(nums[2])||0 };
-    }).filter(s => s.dia > 0);
+    const filterParsed = parseTableByHeaders(filterRows);
+    const filterSections = filterParsed.rows.map(r => ({
+      fra: colVal(r, "top"),
+      til: colVal(r, "bund"),
+      dia: colVal(r, "indv", "diameter"),
+    })).filter(s => s.dia > 0);
 
-    // ── Vandstand: Seneste pejling ────────────────────────────────────────────
-    // vandstandFromHtml er allerede scraped: [{ dato, pejling, kote, maalerNavn }]
-    // Sortér efter dato faldende og tag seneste
+    // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
+    // Jupiter-kolonner: "Dato", "Pejling (m)", "Kote (m DNN)", "Målernavn"
     const vandRows2 = scrapeTable(h, "Vandstand");
-    // Rækker: dato | pejling | kote | ...  – seneste er typisk øverst
-    const senestePejling = vandRows2
-      .filter(r => r.length >= 2 && r[0].match(/\d/) && r[1].match(/[\d.,]/))
-      .slice(0, 1)
-      .map(r => ({ dato: r[0].trim(), pejling: r[1].replace(",",".").trim() }))[0] || null;
+    const vandParsed = parseTableByHeaders(vandRows2);
+    // Tag seneste pejling (første data-række – Jupiter viser nyeste øverst)
+    const senestePejling = vandParsed.rows.length > 0 ? (() => {
+      const r = vandParsed.rows[0];
+      const datoKey  = Object.keys(r).find(k => k.includes("dato"));
+      const pejlKey  = Object.keys(r).find(k => k.includes("pejling") || k.includes("m u"));
+      return {
+        dato:    datoKey  ? r[datoKey].trim()  : "",
+        pejling: pejlKey  ? r[pejlKey].replace(",",".").trim() : "",
+      };
+    })() : null;
 
     htmlData = {
       dguNr:      h.match(/DGU[- ]?nr[.:]?\s*<[^>]+>\s*([\d.]+)/i)?.[1] || dgu,
