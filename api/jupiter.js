@@ -181,30 +181,44 @@ module.exports = async (req, res) => {
       return 0;
     };
 
-    // ── Forerør: Top, Bund, Diameter ──────────────────────────────────────────
-    // Søg i "Boringsopbygning"-sektionen for at undgå false matches
-    // Jupiter HTML-struktur: sektion-overskrift efterfulgt af tabel med kolonner:
-    //   Top (m) | Bund (m) | Materiale | Diameter (mm) | Indv. dia. (mm)
+    // ── Boringsopbygning scope ────────────────────────────────────────────────
+    // Afgrænser søgningen til Boringsopbygning-sektionen for præcision
     const boringsopbygningIdx = h.indexOf("Boringsopbygning");
-    const hScope = boringsopbygningIdx >= 0 ? h.slice(boringsopbygningIdx, boringsopbygningIdx + 15000) : h;
+    const hScope = boringsopbygningIdx >= 0 ? h.slice(boringsopbygningIdx, boringsopbygningIdx + 20000) : h;
 
+    // ── Forerør: alle sektioner med Top, Bund, Diameter ──────────────────────
+    // Jupiter-tabelkolonner (fra screenshot): Stamme | Top* | Bund* | Materiale | Diameter
+    // Overskriften hedder "Forerør" (uden e til sidst)
     const forerRows = scrapeTable(hScope, "Forerør");
     const forerParsed = parseTableByHeaders(forerRows);
     const forerSections = forerParsed.rows.map(r => ({
       top:  colVal(r, "top"),
       bund: colVal(r, "bund"),
-      // "Indv. dia." er den indvendige diameter – foretrækkes frem for udvendig "Diameter"
+      // Prøv "indv" først (indvendig dia.), derefter "diameter"
       dia:  colVal(r, "indv") || colVal(r, "diameter"),
+      materiale: Object.entries(r).find(([k]) => k.includes("mater"))?.[1] || "",
     })).filter(s => s.dia > 0 && s.bund > 0);
 
-    // ── Filter: Top, Bund, Diameter ───────────────────────────────────────────
-    const filterRows = scrapeTable(hScope, "Filter");
+    // ── Filtre: alle sektioner med Top, Bund, Diameter ───────────────────────
+    // NB: Overskriften hedder "Filtre" (med e) i Jupiter-borerapporten!
+    // Kolonner: Stamme | Indtagsnr | Top* | Bund* | Top** | Bund** | Materiale | Diameter | Slidsbredde | Periode
+    // Vi bruger Top* (m u.t.) og Bund* (m u.t.) = kolonner nr. 3 og 4 (index 2 og 3 i 0-baseret)
+    const filterRows = scrapeTable(hScope, "Filtre");
     const filterParsed = parseTableByHeaders(filterRows);
+    // Kolonner: "stamme", "indtagsnr", "top", "bund", "top", "bund", "materiale", "diameter", ...
+    // Da "top" og "bund" forekommer to gange, bruger parseTableByHeaders den FØRSTE forekomst
+    // som er Top* (m u.t.) – det er hvad vi vil have
     const filterSections = filterParsed.rows.map(r => ({
       fra: colVal(r, "top"),
       til: colVal(r, "bund"),
       dia: colVal(r, "indv") || colVal(r, "diameter"),
-    })).filter(s => s.dia > 0);
+      materiale: Object.entries(r).find(([k]) => k.includes("mater"))?.[1] || "",
+    })).filter(s => s.dia > 0 && s.til > 0);
+
+    // Deduplikér filtersektioner (samme fra+til+dia kan forekomme flere gange pga. periode-rækker)
+    const filterSectionsUniq = filterSections.filter((s, i, arr) =>
+      arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
+    );
 
     // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
     // Jupiter-kolonner: "Dato" | "Pejling (m u.t.)" | "Kote (m DNN)" | "Målernavn"
@@ -213,9 +227,10 @@ module.exports = async (req, res) => {
     const vandParsed = parseTableByHeaders(vandRows2);
     const senestePejling = vandParsed.rows.length > 0 ? (() => {
       const r = vandParsed.rows[0];
-      // Find dato-kolonne og pejlingskolonne ved navn
       const datoKey = Object.keys(r).find(k => k.includes("dato"));
-      const pejlKey = Object.keys(r).find(k => k.includes("pejling") || k.includes("m u") || k.includes("mut"));
+      const pejlKey = Object.keys(r).find(k =>
+        k.includes("pejling") || k.includes("m u") || k.includes("mut") || k.includes("m u.t")
+      );
       return {
         dato:    (datoKey ? r[datoKey] : "").trim(),
         pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
@@ -238,7 +253,8 @@ module.exports = async (req, res) => {
       filterDia:  filterSections.length > 0 ? String(filterSections[0].dia) : null,
       filterFra:  filterSections.length > 0 ? String(filterSections[0].fra) : null,
       filterTil:  filterSections.length > 0 ? String(filterSections[0].til) : null,
-      filterSections,  // alle filtersektioner
+      filterSections,        // alle filtersektioner (inkl. dubletter)
+      filterSectionsUniq,    // deduplikerede filtersektioner
       // Vandstand: seneste pejling
       senestePejling,
       rovandstand: senestePejling ? senestePejling.pejling : null,
@@ -337,7 +353,7 @@ module.exports = async (req, res) => {
       filterDiameter:  htmlData.filterDia,
       filterFra:       htmlData.filterFra,
       filterTil:       htmlData.filterTil,
-      filterSections:  htmlData.filterSections || [],
+      filterSections:  htmlData.filterSectionsUniq || htmlData.filterSections || [],
       rovandstand:     htmlData.rovandstand,
       senestePejling:  htmlData.senestePejling,
       indvinding:  htmlData.indvinding,
