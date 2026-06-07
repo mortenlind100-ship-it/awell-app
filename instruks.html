@@ -184,7 +184,7 @@ async function hentJupiter(dguNr) {
     filterFra:       b.filterFra        || "",
     filterTil:       b.filterTil        || "",
     filterDia:       b.filterDiameter   || "",
-    filterSections:  b.filterSections   || [],
+    filterSections:  b.filterSectionsUniq || b.filterSections || [],
     borid:           b.boringsid    || "",
     boreholeUrl:     b.boreholeUrl  || "",
     pdfUrl:          b.pdfUrl       || "",
@@ -192,6 +192,28 @@ async function hentJupiter(dguNr) {
 }
 
 // ─── Word-dokument generator ──────────────────────────────────────────────────
+function wordForerRows(bo, forerDia, forerDybde) {
+  if (bo.forerSections && bo.forerSections.length > 0) {
+    var rows = '<tr><td class="lbl" colspan="4" style="background:#dce8f5;font-weight:bold;color:#1169b0">Forerør</td></tr>';
+    bo.forerSections.forEach(function(s) {
+      rows += '<tr><td class="lbl">Top – Bund (m.u.t.)</td><td>' + s.top + ' – ' + s.bund + '</td><td class="lbl">Diameter (mm)</td><td>' + s.dia + ' mm</td></tr>';
+    });
+    return rows;
+  }
+  return '<tr><td class="lbl">Forerør Ø (mm)</td><td>' + forerDia + '</td><td class="lbl">Forerør bund (m.u.t.)</td><td>' + forerDybde + '</td></tr>';
+}
+
+function wordFilterRows(bo, filterDia, filterFra, filterTil) {
+  if (bo.filterSections && bo.filterSections.length > 0) {
+    var rows = '<tr><td class="lbl" colspan="4" style="background:#dce8f5;font-weight:bold;color:#1169b0">Filtre</td></tr>';
+    bo.filterSections.forEach(function(s) {
+      rows += '<tr><td class="lbl">Top – Bund (m.u.t.)</td><td>' + s.fra + ' – ' + s.til + '</td><td class="lbl">Diameter (mm)</td><td>' + s.dia + ' mm</td></tr>';
+    });
+    return rows;
+  }
+  return '<tr><td class="lbl">Filter Ø (mm)</td><td>' + filterDia + '</td><td class="lbl">Filter fra – til (m.u.t.)</td><td>' + filterFra + ' – ' + filterTil + '</td></tr>';
+}
+
 function buildProfilTabel(lag, bundpejling) {
   const maks = parseFloat(bundpejling) || 1;
   const gyldig = lag.filter(l => l.fraDybde != null);
@@ -300,8 +322,8 @@ ${boringer.map((bo, i) => {
 <table>
   ${harBoring ? `
   <tr><td class="lbl">Dybde (m.u.t.)</td><td>${dybde}</td><td class="lbl">Seneste pejling (m.u.t.)</td><td>${rovand}</td></tr>
-  <tr><td class="lbl">Forerør Ø (mm)</td><td>${forerDia}</td><td class="lbl">Forerør bund (m.u.t.)</td><td>${forerDybde}</td></tr>
-  <tr><td class="lbl">Filter Ø (mm)</td><td>${filterDia}</td><td class="lbl">Filter fra – til (m.u.t.)</td><td>${filterFra} – ${filterTil}</td></tr>
+  ${wordForerRows(bo, forerDia, forerDybde)}
+  ${wordFilterRows(bo, filterDia, filterFra, filterTil)}
   ` : ""}
   ${harBrønd ? `
   <tr><td class="lbl">Brønd indv. Ø (mm)</td><td>${bo.brondDia || "–"}</td><td class="lbl">Brønd dybde (m.u.t.)</td><td>${bo.brondDybde || "–"}</td></tr>
@@ -412,7 +434,7 @@ function BoringKort({ b, i, onChange, onFjern }) {
         filterFra:      d.filterFra     || b.filterFra,
         filterTil:      d.filterTil     || b.filterTil,
         filterDia:      d.filterDia     || b.filterDia,
-        filterSections: d.filterSections|| b.filterSections || [],
+        filterSections: d.filterSections || b.filterSections || [],
         kommune:        d.kommune       || b.kommune,
         boreholeUrl:    d.boreholeUrl,
         pdfUrl:         d.pdfUrl,
@@ -498,34 +520,74 @@ function BoringKort({ b, i, onChange, onFjern }) {
         </div>
 
         {harBoring && <>
-          <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Forerør Ø (mm)</label>
-            <input style={inp} type="number"
-              placeholder={b.forerDia || "f.eks. 203"}
-              value={b.forerDiaFelt} onChange={e => upd("forerDiaFelt", e.target.value)} />
+          {/* Forerørssektioner – fra Jupiter eller manuel indtastning */}
+          <div style={{ gridColumn: "span 2", marginBottom: 10 }}>
+            <label style={lbl}>Forerør – sektioner</label>
+            {(b.forerSections && b.forerSections.length > 0) ? (
+              <div style={{ background: C.white, border: "1px solid " + C.blue4,
+                borderRadius: 6, overflow: "hidden", fontSize: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                  background: C.blue3, padding: "5px 10px", fontWeight: 700,
+                  color: C.blue, fontSize: 11, fontFamily: "'Montserrat',sans-serif" }}>
+                  <span>Top (m.u.t.)</span><span>Bund (m.u.t.)</span>
+                  <span>Diameter (mm)</span><span>Materiale</span>
+                </div>
+                {b.forerSections.map((s, i) => (
+                  <div key={i} style={{ display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                    padding: "6px 10px",
+                    background: i % 2 === 0 ? C.white : C.blue3,
+                    borderTop: "1px solid " + C.blue4 }}>
+                    <span>{s.top}</span><span>{s.bund}</span>
+                    <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
+                    <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <input style={inp} type="number" placeholder="Ø (mm)"
+                  value={b.forerDiaFelt} onChange={e => upd("forerDiaFelt", e.target.value)} />
+                <input style={inp} type="number" step="0.01" placeholder="Bund (m.u.t.)"
+                  value={b.forerBundFelt} onChange={e => upd("forerBundFelt", e.target.value)} />
+              </div>
+            )}
           </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Forerør bund (m.u.t.)</label>
-            <input style={inp} type="number" step="0.01"
-              placeholder={b.forerBund || ""}
-              value={b.forerBundFelt} onChange={e => upd("forerBundFelt", e.target.value)} />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Filter Ø (mm)</label>
-            <input style={inp} type="number"
-              placeholder={b.filterDia || "f.eks. 125"}
-              value={b.filterDiaFelt} onChange={e => upd("filterDiaFelt", e.target.value)} />
-          </div>
-          <div style={{ marginBottom: 10 }}>
-            <label style={lbl}>Filter fra – til (m.u.t.)</label>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input style={{ ...inp, flex: 1 }} type="number" step="0.01"
-                placeholder={b.filterFra || "fra"}
-                value={b.filterFraFelt} onChange={e => upd("filterFraFelt", e.target.value)} />
-              <input style={{ ...inp, flex: 1 }} type="number" step="0.01"
-                placeholder={b.filterTil || "til"}
-                value={b.filterTilFelt} onChange={e => upd("filterTilFelt", e.target.value)} />
-            </div>
+
+          {/* Filtersektioner – fra Jupiter eller manuel indtastning */}
+          <div style={{ gridColumn: "span 2", marginBottom: 10 }}>
+            <label style={lbl}>Filtre – sektioner</label>
+            {(b.filterSections && b.filterSections.length > 0) ? (
+              <div style={{ background: C.white, border: "1px solid " + C.blue4,
+                borderRadius: 6, overflow: "hidden", fontSize: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                  background: C.blue3, padding: "5px 10px", fontWeight: 700,
+                  color: C.blue, fontSize: 11, fontFamily: "'Montserrat',sans-serif" }}>
+                  <span>Top (m.u.t.)</span><span>Bund (m.u.t.)</span>
+                  <span>Diameter (mm)</span><span>Materiale</span>
+                </div>
+                {b.filterSections.map((s, i) => (
+                  <div key={i} style={{ display: "grid",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                    padding: "6px 10px",
+                    background: i % 2 === 0 ? C.white : C.blue3,
+                    borderTop: "1px solid " + C.blue4 }}>
+                    <span>{s.fra}</span><span>{s.til}</span>
+                    <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
+                    <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <input style={inp} type="number" placeholder="Ø (mm)"
+                  value={b.filterDiaFelt} onChange={e => upd("filterDiaFelt", e.target.value)} />
+                <input style={inp} type="number" step="0.01" placeholder="Fra (m.u.t.)"
+                  value={b.filterFraFelt} onChange={e => upd("filterFraFelt", e.target.value)} />
+                <input style={inp} type="number" step="0.01" placeholder="Til (m.u.t.)"
+                  value={b.filterTilFelt} onChange={e => upd("filterTilFelt", e.target.value)} />
+              </div>
+            )}
           </div>
         </>}
 
