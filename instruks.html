@@ -52,17 +52,33 @@ const MATERIALER = [
   { id: "cement_stolpe",    label: "Stolpebeton / Støbemasse",  kgPerL: 1.13, farve: "#808080" },
 ];
 
-const GREJ_STANDARD = [
-  "Lastbil", "Lille lastbil", "Minilæsser", "Minigraver (Loxam)",
-  "Gravemaskine", "Maskintrailer", "Kran / tre-ben",
-  "Støbeanlæg", "Blandeanlæg", "Honda generator", "Kuffertgenerator",
-  "SQ pumpe", "Lænsepumpe 2\"", "Palletank",
-  "Bundpejl", "Rovandspejl", "Bundpejl + rovandspejl",
-  "Vinkelsliber", "Bajonetsav", "Borehammer", "Kædesav",
-  "Trillebør", "Håndskovl", "Drænspade", "Rive", "Koben",
-  "Glas til vandprøve (2 stk)", "Slange + kobling til vand",
-  "Hjelm", "Høreværn og briller", "Blå overtrækssko",
-  "Mandhejs og sele", "Løftestropper", "Plastplader / køreplader",
+const GREJ_KATEGORIER = [
+  {
+    label: "🚛 Køretøjer og maskiner",
+    items: [
+      "Lastbil", "Lille lastbil", "Minilæsser", "Minigraver (Loxam)",
+      "Gravemaskine", "Maskintrailer", "Kran / tre-ben",
+    ],
+  },
+  {
+    label: "🔧 Udstyr og værktøj",
+    items: [
+      "Støbeanlæg", "Blandeanlæg", "Honda generator", "Kuffertgenerator",
+      "SQ pumpe", "Lænsepumpe 2\"", "Palletank",
+      "Bundpejl", "Rovandspejl", "Bundpejl + rovandspejl",
+      "Vinkelsliber", "Bajonetsav", "Borehammer", "Kædesav",
+      "Trillebør", "Håndskovl", "Drænspade", "Rive", "Koben",
+      "Slange + kobling til vand", "Løftestropper", "Plastplader / køreplader",
+    ],
+  },
+  {
+    label: "🦺 Sikkerhed og prøvetagning",
+    items: [
+      "Hjelm", "Høreværn og briller", "Blå overtrækssko",
+      "Mandhejs og sele",
+      "Glas til vandprøve (2 stk)",
+    ],
+  },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -312,7 +328,7 @@ ${allGrej.length > 0 ? `
 <ul>${allGrej.map(e => `<li>${e}</li>`).join("")}</ul>
 ` : ""}
 
-<h2>${allGrej.length > 0 ? "7" : "6"}.  Dokumentation</h2>
+<h2>${allGrej.length > 0 ? "8" : "7"}.  Dokumentation</h2>
 <ul>${(projekt.dokumentation || "").split("\n").filter(Boolean).map(d => `<li>${d.replace(/^[-•]\s*/, "")}</li>`).join("")}</ul>
 
 <p class="footer">Awell Brøndboring A/S  ·  Arbejdsinstruks genereret ${new Date().toLocaleDateString("da-DK")}</p>
@@ -791,11 +807,12 @@ function App() {
   }
 
   const faner = [
-    { id: "projekt",    label: "📋 Projekt"   },
-    { id: "boringer",   label: "⛏️ Boringer"  },
-    { id: "sloejfning", label: "🪣 Sløjfning" },
-    { id: "grej",       label: "🔧 Grej"       },
-    { id: "generer",    label: "📄 Generer"    },
+    { id: "projekt",    label: "📋 Projekt"    },
+    { id: "boringer",   label: "⛏️ Boringer"   },
+    { id: "sloejfning", label: "🪣 Sløjfning"  },
+    { id: "grej",       label: "🔧 Grej"        },
+    { id: "materialer", label: "📦 Materialer"  },
+    { id: "generer",    label: "📄 Generer"     },
   ];
 
   return (
@@ -964,35 +981,123 @@ function App() {
         {/* ── GREJ ────────────────────────────────────────────────────────── */}
         {fane === "grej" && <>
           <Sekt n="4" title="Grej og udstyr" icon="🔧" />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
-            {GREJ_STANDARD.map(e => {
-              const aktiv = grej.includes(e);
-              return (
-                <label key={e} style={{ display: "flex", alignItems: "center", gap: 8,
-                  padding: "8px 12px", border: "1px solid " + (aktiv ? C.blue : C.blue4),
-                  borderRadius: 7, cursor: "pointer",
-                  background: aktiv ? C.blue3 : C.white,
-                  fontSize: 12, fontWeight: aktiv ? 700 : 400 }}>
-                  <input type="checkbox" checked={aktiv} onChange={() =>
-                    setGrej(prev => aktiv ? prev.filter(x => x !== e) : [...prev, e])} />
-                  {e}
-                </label>
-              );
-            })}
-          </div>
+          {GREJ_KATEGORIER.map(kat => (
+            <div key={kat.label} style={{ marginBottom: 20 }}>
+              <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
+                fontSize: 13, color: C.blue, marginBottom: 8,
+                borderBottom: "1px solid " + C.blue4, paddingBottom: 4 }}>
+                {kat.label}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                {kat.items.map(e => {
+                  const aktiv = grej.includes(e);
+                  return (
+                    <label key={e} style={{ display: "flex", alignItems: "center", gap: 8,
+                      padding: "7px 12px", border: "1px solid " + (aktiv ? C.blue : C.blue4),
+                      borderRadius: 7, cursor: "pointer",
+                      background: aktiv ? C.blue3 : C.white,
+                      fontSize: 12, fontWeight: aktiv ? 700 : 400 }}>
+                      <input type="checkbox" checked={aktiv} onChange={() =>
+                        setGrej(prev => aktiv ? prev.filter(x => x !== e) : [...prev, e])} />
+                      {e}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
           <F label="Fritekst-grej (ét styk pr. linje)" col2>
             <textarea style={ta} value={friGrej}
               onChange={e => setFriGrej(e.target.value)}
               placeholder="F.eks. 2 bigbags bentonit pellets á 500 kg..." />
           </F>
-          <button style={btn()} onClick={() => setFane("generer")}>
-            Næste: Generer →
+          <button style={btn()} onClick={() => setFane("materialer")}>
+            Næste: Materialer →
           </button>
+        </>}
+
+        {/* ── MATERIALER ──────────────────────────────────────────────────── */}
+        {fane === "materialer" && <>
+          <Sekt n="5" title="Materialer" icon="🪣" />
+          <p style={{ fontSize: 13, color: C.text2, marginBottom: 18, lineHeight: 1.6 }}>
+            Opsummering af sløjfningsmaterialer fra sløjfningssekvensen.
+            Justér mængderne efter behov.
+          </p>
+          {(() => {
+            const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
+            const aggr = {};
+            beregnetLag.forEach(l => {
+              if (!l.kg || parseFloat(l.kg) <= 0) return;
+              aggr[l.material] = (aggr[l.material] || 0) + (parseFloat(l.kg) || 0);
+            });
+            const entries = Object.entries(aggr);
+            if (entries.length === 0) return (
+              <div style={{ background: "#fff8e1", border: "1px solid #ffe082",
+                borderRadius: 8, padding: "12px 16px", fontSize: 13, color: "#8d6e00" }}>
+                💡 Ingen materialer endnu – gå til fanebladet "Sløjfning" og tilføj lag med mængder.
+              </div>
+            );
+            return (
+              <div style={{ background: C.white, border: "1px solid " + C.blue4,
+                borderRadius: 10, overflow: "hidden" }}>
+                {entries.map(([matId, totalKg], i) => {
+                  const mat = MATERIALER.find(m => m.id === matId);
+                  return (
+                    <div key={matId} style={{
+                      display: "flex", alignItems: "center", gap: 14,
+                      padding: "13px 16px",
+                      borderBottom: i < entries.length - 1 ? "1px solid " + C.blue4 : "none",
+                      background: i % 2 === 0 ? C.white : C.blue3,
+                    }}>
+                      <div style={{ width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                        background: mat?.farve || "#ccc" }} />
+                      <div style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>
+                        {matLabel(matId)}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <input
+                          type="number" step="10" min="0"
+                          value={totalKg}
+                          onChange={e => {
+                            const nyKg = parseFloat(e.target.value) || 0;
+                            // Fordel ny totalKg proportionalt på lag med dette materiale
+                            const lagsIndex = beregnetLag.reduce((acc, l, idx) => {
+                              if (l.material === matId && parseFloat(l.kg) > 0) acc.push(idx);
+                              return acc;
+                            }, []);
+                            if (lagsIndex.length === 1) {
+                              setLag(prev => prev.map((l, idx) =>
+                                idx === lagsIndex[0] ? { ...l, kg: String(nyKg) } : l
+                              ));
+                            }
+                          }}
+                          style={{ ...inp, width: 100, textAlign: "right",
+                            fontWeight: 700, fontSize: 15 }}
+                        />
+                        <span style={{ color: C.text2, fontSize: 13, width: 24 }}>kg</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ padding: "12px 16px", borderTop: "2px solid " + C.blue,
+                  display: "flex", justifyContent: "space-between",
+                  fontFamily: "'Montserrat', sans-serif", fontWeight: 800 }}>
+                  <span>Total</span>
+                  <span>{Object.values(aggr).reduce((s, v) => s + v, 0).toFixed(0)} kg</span>
+                </div>
+              </div>
+            );
+          })()}
+          <div style={{ marginTop: 20 }}>
+            <button style={btn()} onClick={() => setFane("generer")}>
+              Næste: Generer →
+            </button>
+          </div>
         </>}
 
         {/* ── GENERER ─────────────────────────────────────────────────────── */}
         {fane === "generer" && <>
-          <Sekt n="5" title="Generer arbejdsinstruks" icon="📄" />
+          <Sekt n="6" title="Generer arbejdsinstruks" icon="📄" />
 
           {/* Opsummering */}
           <div style={{ background: C.white, border: "1px solid " + C.blue4,
