@@ -106,9 +106,13 @@ module.exports = async (req, res) => {
          || text.match(/get_cyklogram\.jsp\?borid=(\d+)/)?.[1]
          || text.match(/borerapport\.jsp\?borid=(\d+)/)?.[1];
 
-    if (borid && r.status === 200 && text.length > 1000) {
-      boreholeHtml = text; // Save for scraping
+    // Gem kun HTML hvis det er selve borerapporten (ikke en søgeliste)
+    // En rigtig borerapport indeholder "Boringsopbygning" eller "Forerør"
+    if (borid && r.status === 200 && text.length > 1000
+        && (text.includes("Boringsopbygning") || text.includes("Forerør") || text.includes("Vandstand"))) {
+      boreholeHtml = text;
     }
+    // Ellers: borid er fundet men siden er en søgeliste - boreholeHtml hentes i Step 3
   } catch(e) {
     return res.status(502).json({ error: "Kunne ikke kontakte GEUS: " + e.message });
   }
@@ -130,14 +134,18 @@ module.exports = async (req, res) => {
     }
   } catch(_) {}
 
-  // ── Step 3: Scrape borerapport HTML for rich data ─────────────────────────────
-  // If we don't have the HTML yet, fetch it now
-  if (!boreholeHtml) {
-    try {
-      const r = await fetch(`https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${borid}`, { headers: hdrs, signal: AbortSignal.timeout(15000) });
-      if (r.ok) boreholeHtml = await r.text();
-    } catch(_) {}
-  }
+  // ── Step 3: Hent borerapport HTML via borid (altid - sikrer vi får den rigtige side) ────
+  try {
+    const reportUrl = `https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${borid}`;
+    const r = await fetch(reportUrl, { headers: hdrs, signal: AbortSignal.timeout(20000) });
+    if (r.ok) {
+      const t = await r.text();
+      // Verificer at vi har en rigtig borerapport
+      if (t.includes("Forerør") || t.includes("Vandstand") || t.includes("Boringsopbygning")) {
+        boreholeHtml = t;
+      }
+    }
+  } catch(_) {}
 
   // Extract key data from HTML
   let htmlData = {};
@@ -174,37 +182,43 @@ module.exports = async (req, res) => {
     };
 
     // ── Forerør: Top, Bund, Diameter ──────────────────────────────────────────
-    // Jupiter-kolonner: "Top (m)", "Bund (m)", "Materiale", "Diameter (mm)", "Indv. dia. (mm)"
-    const forerRows = scrapeTable(h, "Forerør");
+    // Søg i "Boringsopbygning"-sektionen for at undgå false matches
+    // Jupiter HTML-struktur: sektion-overskrift efterfulgt af tabel med kolonner:
+    //   Top (m) | Bund (m) | Materiale | Diameter (mm) | Indv. dia. (mm)
+    const boringsopbygningIdx = h.indexOf("Boringsopbygning");
+    const hScope = boringsopbygningIdx >= 0 ? h.slice(boringsopbygningIdx, boringsopbygningIdx + 15000) : h;
+
+    const forerRows = scrapeTable(hScope, "Forerør");
     const forerParsed = parseTableByHeaders(forerRows);
     const forerSections = forerParsed.rows.map(r => ({
       top:  colVal(r, "top"),
       bund: colVal(r, "bund"),
-      dia:  colVal(r, "indv", "diameter"),   // Indv. dia. foretrækkes, fallback til Diameter
+      // "Indv. dia." er den indvendige diameter – foretrækkes frem for udvendig "Diameter"
+      dia:  colVal(r, "indv") || colVal(r, "diameter"),
     })).filter(s => s.dia > 0 && s.bund > 0);
 
     // ── Filter: Top, Bund, Diameter ───────────────────────────────────────────
-    // Jupiter-kolonner: "Top (m)", "Bund (m)", "Materiale", "Diameter (mm)", "Indv. dia. (mm)"
-    const filterRows = scrapeTable(h, "Filter");
+    const filterRows = scrapeTable(hScope, "Filter");
     const filterParsed = parseTableByHeaders(filterRows);
     const filterSections = filterParsed.rows.map(r => ({
       fra: colVal(r, "top"),
       til: colVal(r, "bund"),
-      dia: colVal(r, "indv", "diameter"),
+      dia: colVal(r, "indv") || colVal(r, "diameter"),
     })).filter(s => s.dia > 0);
 
     // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
-    // Jupiter-kolonner: "Dato", "Pejling (m)", "Kote (m DNN)", "Målernavn"
+    // Jupiter-kolonner: "Dato" | "Pejling (m u.t.)" | "Kote (m DNN)" | "Målernavn"
+    // Nyeste måling vises øverst i tabellen.
     const vandRows2 = scrapeTable(h, "Vandstand");
     const vandParsed = parseTableByHeaders(vandRows2);
-    // Tag seneste pejling (første data-række – Jupiter viser nyeste øverst)
     const senestePejling = vandParsed.rows.length > 0 ? (() => {
       const r = vandParsed.rows[0];
-      const datoKey  = Object.keys(r).find(k => k.includes("dato"));
-      const pejlKey  = Object.keys(r).find(k => k.includes("pejling") || k.includes("m u"));
+      // Find dato-kolonne og pejlingskolonne ved navn
+      const datoKey = Object.keys(r).find(k => k.includes("dato"));
+      const pejlKey = Object.keys(r).find(k => k.includes("pejling") || k.includes("m u") || k.includes("mut"));
       return {
-        dato:    datoKey  ? r[datoKey].trim()  : "",
-        pejling: pejlKey  ? r[pejlKey].replace(",",".").trim() : "",
+        dato:    (datoKey ? r[datoKey] : "").trim(),
+        pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
       };
     })() : null;
 
