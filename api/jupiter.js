@@ -174,7 +174,7 @@ const _jupiterHandler = async (req, res) => {
         headers,
         rows: dataRows.map(r => {
           const obj = {};
-          headers.forEach((hdr, i) => { obj[hdr] = (r[i] || "").replace(",",".").trim(); });
+          headers.forEach((hdr, i) => { obj[hdr] = ((r[i] ?? "").replace(",",".").trim()); });
           return obj;
         })
       };
@@ -233,12 +233,12 @@ const _jupiterHandler = async (req, res) => {
       const bundIdx = 3;   // Bund* (m u.t.) er altid kolonne 3
 
       const alleRaekker = filterAllRows.slice(1).map(r => {
-        const periode = periodeIdx >= 0 ? (r[periodeIdx] || "").trim() : "";
+        const periode = periodeIdx >= 0 ? ((r[periodeIdx] ?? "").trim()) : "";
         return {
           fra:       parseFloat((r[topIdx]  || "").replace(",", ".")) || 0,
           til:       parseFloat((r[bundIdx] || "").replace(",", ".")) || 0,
-          dia:       parseFloat((diaIdx >= 0 ? r[diaIdx] : "").replace(",", ".")) || 0,
-          materiale: materIdx >= 0 ? (r[materIdx] || "").trim() : "",
+          dia:       parseFloat((diaIdx >= 0 ? (r[diaIdx] ?? "") : "").replace(",", ".")) || 0,
+          materiale: materIdx >= 0 ? ((r[materIdx] ?? "").trim()) : "",
           periode,
           // Aktiv = perioden slutter med " -" (åben slutdato = stadig aktiv)
           aktiv: /[-–]\s*$/.test(periode),
@@ -277,8 +277,8 @@ const _jupiterHandler = async (req, res) => {
         );
         if (datoKey || pejlKey) {
           senestePejling = {
-            dato:    (datoKey ? r[datoKey] : "").trim(),
-            pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
+            dato:    ((r[datoKey] ?? "")).trim(),
+            pejling: ((r[pejlKey] ?? "").replace(",", ".").trim()),
           };
         }
       }
@@ -293,8 +293,8 @@ const _jupiterHandler = async (req, res) => {
           k.includes("pejling") || k.includes("m u") || k.includes("mut")
         );
         senestePejling = {
-          dato:    (datoKey ? r[datoKey] : "").trim(),
-          pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
+          dato:    ((r[datoKey] ?? "")).trim(),
+          pejling: ((r[pejlKey] ?? "").replace(",", ".").trim()),
         };
       } else if (vandRows2.length >= 2) {
         // Direkte rækkeopslag hvis parseTableByHeaders fejler
