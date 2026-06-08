@@ -287,10 +287,14 @@ const _jupiterHandler = async (req, res) => {
       // kun DATA-rækker (ikke header). vandRows2[0] er altså første datarække.
       // Kolonnerækkefølge: [Dato, Pejling (m u.t.), Kote (m DNN), Målernavn]
       if (vandRows2.length >= 1) {
-        const r = vandRows2[0]; // første (og typisk eneste) datarække
+        const r = vandRows2[0]; // første datarække
+        // Jupiter kolonner: Indtagsnr(0) | Vandstand*(1) | Vandstandskote(2) | Dato(3)
+        // Detektér kolonnerækkefølge: hvis r[0] er et heltal (Indtagsnr), brug r[1]+r[3]
+        // Ellers fald tilbage til r[0]+r[1] (gammel format: Dato | Pejling)
+        const forsteErIndtag = /^\d+$/.test((r[0] || "").trim());
         senestePejling = {
-          dato:    (r[0] || "").trim(),
-          pejling: (r[1] || "").replace(",", ".").trim(),
+          pejling: (forsteErIndtag ? r[1] : r[1] || r[0] || "").replace(",", ".").trim(),
+          dato:    (forsteErIndtag ? r[3] : r[0] || "").trim(),
         };
       }
     }
