@@ -83,8 +83,8 @@ const _jupiterHandler = async (req, res) => {
     while ((rm = rowRe.exec(section)) !== null) {
       const cells = rm[1].match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi);
       if (cells) {
-        const vals = cells.map(c => c.replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").trim()).filter(Boolean);
-        if (vals.length >= 2) rows.push(vals);
+        const vals = cells.map(c => c.replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").trim());
+        if (vals.filter(Boolean).length >= 2) rows.push(vals);
       }
     }
     return rows;
@@ -283,24 +283,14 @@ const _jupiterHandler = async (req, res) => {
         }
       }
     } else {
-      // Seneste pejling-tabellen: header + 1 datarække
-      // Typisk: ["Dato", "Pejling (m u.t.)", "Kote (m DNN)", "Målernavn"]
-      const vandParsed2 = parseTableByHeaders(vandRows2);
-      if (vandParsed2.rows.length > 0) {
-        const r = vandParsed2.rows[0];
-        const datoKey = Object.keys(r).find(k => k.includes("dato"));
-        const pejlKey = Object.keys(r).find(k =>
-          k.includes("pejling") || k.includes("m u") || k.includes("mut")
-        );
+      // scrapeTable("Dato") starter fra "Dato"-teksten i <th> og returnerer
+      // kun DATA-rækker (ikke header). vandRows2[0] er altså første datarække.
+      // Kolonnerækkefølge: [Dato, Pejling (m u.t.), Kote (m DNN), Målernavn]
+      if (vandRows2.length >= 1) {
+        const r = vandRows2[0]; // første (og typisk eneste) datarække
         senestePejling = {
-          dato:    ((r[datoKey] ?? "")).trim(),
-          pejling: ((r[pejlKey] ?? "").replace(",", ".").trim()),
-        };
-      } else if (vandRows2.length >= 2) {
-        // Direkte rækkeopslag hvis parseTableByHeaders fejler
-        senestePejling = {
-          dato:    (vandRows2[1]?.[0] || "").trim(),
-          pejling: (vandRows2[1]?.[1] || "").replace(",", ".").trim(),
+          dato:    (r[0] || "").trim(),
+          pejling: (r[1] || "").replace(",", ".").trim(),
         };
       }
     }
