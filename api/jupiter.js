@@ -199,43 +199,114 @@ module.exports = async (req, res) => {
       materiale: Object.entries(r).find(([k]) => k.includes("mater"))?.[1] || "",
     })).filter(s => s.dia > 0 && s.bund > 0);
 
-    // ── Filtre: alle sektioner med Top, Bund, Diameter ───────────────────────
-    // NB: Overskriften hedder "Filtre" (med e) i Jupiter-borerapporten!
-    // Kolonner: Stamme | Indtagsnr | Top* | Bund* | Top** | Bund** | Materiale | Diameter | Slidsbredde | Periode
-    // Vi bruger Top* (m u.t.) og Bund* (m u.t.) = kolonner nr. 3 og 4 (index 2 og 3 i 0-baseret)
+    // ── Filtre: kun AKTIVE sektioner baseret på Periode-kolonnen ────────────
+    // Jupiter-kolonner: Stamme | Indtagsnr | Top* | Bund* | Top** | Bund** | Materiale | Diameter | Slidsbredde | Periode
+    // Periode-formater:
+    //   "3. juli 2009 -"   → aktiv (starter dato, slutter med bindestreg)
+    //   "- 3. juli 2009"   → udgået (starter med bindestreg, slutter dato)
+    //   "3. juli 2009 - 1. jan 2020" → afgrænset periode, udgået
+    // Vi beholder KUN rækker hvor periode slutter med " -" (dvs. stadig aktiv)
     const filterRows = scrapeTable(hScope, "Filtre");
-    const filterParsed = parseTableByHeaders(filterRows);
-    // Kolonner: "stamme", "indtagsnr", "top", "bund", "top", "bund", "materiale", "diameter", ...
-    // Da "top" og "bund" forekommer to gange, bruger parseTableByHeaders den FØRSTE forekomst
-    // som er Top* (m u.t.) – det er hvad vi vil have
-    const filterSections = filterParsed.rows.map(r => ({
-      fra: colVal(r, "top"),
-      til: colVal(r, "bund"),
-      dia: colVal(r, "indv") || colVal(r, "diameter"),
-      materiale: Object.entries(r).find(([k]) => k.includes("mater"))?.[1] || "",
-    })).filter(s => s.dia > 0 && s.til > 0);
 
-    // Deduplikér filtersektioner (samme fra+til+dia kan forekomme flere gange pga. periode-rækker)
-    const filterSectionsUniq = filterSections.filter((s, i, arr) =>
-      arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
-    );
+    // parseTableByHeaders bruger første række som headers.
+    // Problemet: "top" og "bund" forekommer to gange i headeren.
+    // Løsning: lav vores eget row-parse der tager kolonner ved INDEX.
+    const filterAllRows = filterRows.filter(r => r.length >= 4);
+    if (filterAllRows.length < 2) {
+      var filterSections = [];
+      var filterSectionsUniq = [];
+    } else {
+      // Header-række til at finde Diameter og Periode kolonne-index
+      const fHeaders = filterAllRows[0].map(h2 => h2.toLowerCase().replace(/[()* ]/g, ""));
+      const diaIdx     = fHeaders.findIndex(h2 => h2.includes("diameter"));
+      const periodeIdx = fHeaders.findIndex(h2 => h2.includes("periode"));
+      const materIdx   = fHeaders.findIndex(h2 => h2.includes("mater"));
+      // Top* er kolonne index 2, Bund* er kolonne index 3 (0-baseret, efter Stamme og Indtagsnr)
+      const topIdx  = 2;
+      const bundIdx = 3;
+
+      var filterSections = filterAllRows.slice(1).map(r => {
+        const periode = periodeIdx >= 0 ? (r[periodeIdx] || "").trim() : "";
+        // Aktiv = perioden slutter med " -" og har IKKE en slutdato efter bindestregen
+        const aktiv = /\s*-\s*$/.test(periode);
+        return {
+          fra:       parseFloat((r[topIdx]  || "").replace(",", ".")) || 0,
+          til:       parseFloat((r[bundIdx] || "").replace(",", ".")) || 0,
+          dia:       parseFloat((diaIdx >= 0 ? r[diaIdx] : "").replace(",", ".")) || 0,
+          materiale: materIdx >= 0 ? (r[materIdx] || "").trim() : "",
+          periode,
+          aktiv,
+        };
+      }).filter(s => s.dia > 0 && s.til > 0 && s.aktiv);
+
+      // Deduplikér (samme fra+til+dia)
+      var filterSectionsUniq = filterSections.filter((s, i, arr) =>
+        arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
+      );
+
+      // Hvis ingen aktive perioder fundet (ældre boringer har muligvis ikke periodedata),
+      // fald tilbage til alle sektioner deduplikeret
+      if (filterSectionsUniq.length === 0) {
+        filterSectionsUniq = filterAllRows.slice(1).map(r => ({
+          fra:  parseFloat((r[topIdx]  || "").replace(",", ".")) || 0,
+          til:  parseFloat((r[bundIdx] || "").replace(",", ".")) || 0,
+          dia:  parseFloat((diaIdx >= 0 ? r[diaIdx] : "").replace(",", ".")) || 0,
+          materiale: materIdx >= 0 ? (r[materIdx] || "").trim() : "",
+        })).filter((s, i, arr) =>
+          s.dia > 0 && s.til > 0 &&
+          arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
+        );
+      }
+    }
 
     // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
-    // Jupiter-kolonner: "Dato" | "Pejling (m u.t.)" | "Kote (m DNN)" | "Målernavn"
-    // Nyeste måling vises øverst i tabellen.
-    const vandRows2 = scrapeTable(h, "Vandstand");
-    const vandParsed = parseTableByHeaders(vandRows2);
-    const senestePejling = vandParsed.rows.length > 0 ? (() => {
-      const r = vandParsed.rows[0];
-      const datoKey = Object.keys(r).find(k => k.includes("dato"));
-      const pejlKey = Object.keys(r).find(k =>
-        k.includes("pejling") || k.includes("m u") || k.includes("mut") || k.includes("m u.t")
-      );
-      return {
-        dato:    (datoKey ? r[datoKey] : "").trim(),
-        pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
-      };
-    })() : null;
+    // Jupiter borerapporten har en sektion "Seneste pejling" med én tabel-række:
+    //   Dato | Pejling (m u.t.) | Kote (m DNN) | Målernavn
+    // Vi søger specifikt i "Seneste pejling"-sektionen for at undgå at blande
+    // den med den fulde vandstandstabel som kan indeholde hundredvis af målinger.
+    let senestePejling = null;
+    const senesteIdx = h.indexOf("Seneste pejling");
+    const vandScope  = senesteIdx >= 0 ? h.slice(senesteIdx, senesteIdx + 3000) : h;
+    const vandRows2  = scrapeTable(vandScope, "Dato");  // Tabellen starter med "Dato"-kolonne
+    if (vandRows2.length === 0) {
+      // Fallback: søg i den fulde vandstand-sektion
+      const vandRows3 = scrapeTable(h, "Vandstand");
+      const vandParsed3 = parseTableByHeaders(vandRows3);
+      if (vandParsed3.rows.length > 0) {
+        const r = vandParsed3.rows[0];
+        const datoKey = Object.keys(r).find(k => k.includes("dato"));
+        const pejlKey = Object.keys(r).find(k =>
+          k.includes("pejling") || k.includes("m u") || k.includes("mut")
+        );
+        if (datoKey || pejlKey) {
+          senestePejling = {
+            dato:    (datoKey ? r[datoKey] : "").trim(),
+            pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
+          };
+        }
+      }
+    } else {
+      // Seneste pejling-tabellen: header + 1 datarække
+      // Typisk: ["Dato", "Pejling (m u.t.)", "Kote (m DNN)", "Målernavn"]
+      const vandParsed2 = parseTableByHeaders(vandRows2);
+      if (vandParsed2.rows.length > 0) {
+        const r = vandParsed2.rows[0];
+        const datoKey = Object.keys(r).find(k => k.includes("dato"));
+        const pejlKey = Object.keys(r).find(k =>
+          k.includes("pejling") || k.includes("m u") || k.includes("mut")
+        );
+        senestePejling = {
+          dato:    (datoKey ? r[datoKey] : "").trim(),
+          pejling: (pejlKey ? r[pejlKey] : "").replace(",", ".").trim(),
+        };
+      } else if (vandRows2.length >= 2) {
+        // Direkte rækkeopslag hvis parseTableByHeaders fejler
+        senestePejling = {
+          dato:    (vandRows2[1]?.[0] || "").trim(),
+          pejling: (vandRows2[1]?.[1] || "").replace(",", ".").trim(),
+        };
+      }
+    }
 
     htmlData = {
       dguNr:      h.match(/DGU[- ]?nr[.:]?\s*<[^>]+>\s*([\d.]+)/i)?.[1] || dgu,
