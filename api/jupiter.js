@@ -1,5 +1,4 @@
-module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+const _jupiterHandler = async (req, res) => {
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   if (req.method === "OPTIONS") return res.status(200).end();
 
@@ -437,4 +436,13 @@ module.exports = async (req, res) => {
     dgu,
     _meta: { borid, pdfUrl, lithoCount: litho.length, vandstandCount: vandstandFromHtml.length, htmlDataKeys: Object.keys(htmlData).filter(k=>htmlData[k]) },
   });
+};
+
+module.exports = async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  try {
+    await _jupiterHandler(req, res);
+  } catch(e) {
+    try { res.status(500).json({ error: "Serverfejl: " + e.message }); } catch(_) {}
+  }
 };
