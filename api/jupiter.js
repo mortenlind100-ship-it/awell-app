@@ -91,64 +91,34 @@ module.exports = async (req, res) => {
     return rows;
   };
 
-  // ── Step 1: Find borid – prøver to metoder parallelt ────────────────────────
-  // Metode A: borerapport.jsp?dgunr= (redirecter til ?borid=XXXX)
-  // Metode B: WFS CQL-filter på txt_search (direkte DB-opslag, meget hurtigt)
-  // Den første der returnerer borid vinder.
+  // ── Step 1: Find borid via borerapport.jsp?dgunr= ────────────────────────────
   let borid = null;
   let boreholeHtml = null;
 
-  const extractBorid = (text, url) => {
-    return (url && url.match(/borid=(\d+)/))?.[1]
-        || text.match(/borid=(\d+)/i)?.[1]
-        || text.match(/get_cyklogram\.jsp\?borid=(\d+)/)?.[1]
-        || text.match(/borerapport\.jsp\?borid=(\d+)/)?.[1]
-        || text.match(/jupiter_boringer_ws\.(\d+)/)?.[1];
-  };
-
-  const isRealReport = (t) =>
-    t.includes("Boringsopbygning") || t.includes("Forerør") || t.includes("Vandstand");
-
   try {
-    // Kør begge opslag parallelt – tag første gyldige borid
-    const dguFloat = parseFloat(dgu.replace(/[A-Za-z]+$/, ""));
-    const wfsCqlUrl = "https://data.geus.dk/geusmap/ows/25832.jsp?SERVICE=WFS&VERSION=1.0.0"
-      + "&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=1&OUTPUTFORMAT=GML2"
-      + "&CQL_FILTER=dgunr=" + dguFloat;
+    const url = `https://data.geus.dk/JupiterWWW/borerapport.jsp?dgunr=${encodeURIComponent(dgu)}`;
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(12000), redirect: "follow" });
+    const text = await r.text();
 
-    const boreholdUrl = "https://data.geus.dk/JupiterWWW/borerapport.jsp?dgunr=" + encodeURIComponent(dgu);
+    // Extract borid from page content
+    borid = r.url.match(/borid=(\d+)/)?.[1]
+         || text.match(/borid=(\d+)/i)?.[1]
+         || text.match(/get_cyklogram\.jsp\?borid=(\d+)/)?.[1]
+         || text.match(/borerapport\.jsp\?borid=(\d+)/)?.[1];
 
-    const [htmlResult, wfsResult] = await Promise.allSettled([
-      fetch(boreholdUrl, { headers: hdrs, signal: AbortSignal.timeout(8000), redirect: "follow" })
-        .then(async r => ({ text: await r.text(), url: r.url, ok: r.ok })),
-      fetch(wfsCqlUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(6000) })
-        .then(async r => ({ text: await r.text(), ok: r.ok })),
-    ]);
-
-    // Forsøg borid fra HTML (metode A)
-    if (htmlResult.status === "fulfilled" && htmlResult.value.ok) {
-      const { text, url } = htmlResult.value;
-      const bid = extractBorid(text, url);
-      if (bid) {
-        borid = bid;
-        if (text.length > 1000 && isRealReport(text)) {
-          boreholeHtml = text;
-        }
-      }
+    // Gem kun HTML hvis det er selve borerapporten (ikke en søgeliste)
+    // En rigtig borerapport indeholder "Boringsopbygning" eller "Forerør"
+    if (borid && r.status === 200 && text.length > 1000
+        && (text.includes("Boringsopbygning") || text.includes("Forerør") || text.includes("Vandstand"))) {
+      boreholeHtml = text;
     }
-
-    // Forsøg borid fra WFS (metode B) – bruges hvis metode A fejlede
-    if (!borid && wfsResult.status === "fulfilled" && wfsResult.value.ok) {
-      const bid = extractBorid(wfsResult.value.text, null);
-      if (bid) borid = bid;
-    }
-
+    // Ellers: borid er fundet men siden er en søgeliste - boreholeHtml hentes i Step 3
   } catch(e) {
-    // Uventet fejl
+    // Step 1 fejlede - forsøger alligevel med WFS i step 2+3
   }
 
   if (!borid) {
-    return res.status(404).json({ error: "Ingen boring fundet for DGU " + dgu + ". Kontrollér nummeret." });
+    return res.status(404).json({ error: "Ingen boring fundet for DGU " + dgu + ". Tjek nummeret eller prøv igen." });
   }
 
   // ── Step 2+3: WFS og borerapport HTML køres PARALLELT ──────────────────────
@@ -161,7 +131,7 @@ module.exports = async (req, res) => {
     (async () => {
       try {
         const wfsUrl = "https://data.geus.dk/geusmap/ows/25832.jsp?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&FEATUREID=jupiter_boringer_ws." + borid;
-        const r = await fetch(wfsUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(6000) });
+        const r = await fetch(wfsUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(8000) });
         const t = await r.text();
         if (r.ok && t.includes("featureMember")) {
           bf = allFields(t);
@@ -174,7 +144,7 @@ module.exports = async (req, res) => {
       if (boreholeHtml) return; // Step 1 gav os allerede en god rapport
       try {
         const reportUrl = "https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=" + borid;
-        const r = await fetch(reportUrl, { headers: hdrs, signal: AbortSignal.timeout(7000) });
+        const r = await fetch(reportUrl, { headers: hdrs, signal: AbortSignal.timeout(15000) });
         if (r.ok) {
           const t = await r.text();
           if (t.includes("Forerør") || t.includes("Vandstand") || t.includes("Boringsopbygning")) {
