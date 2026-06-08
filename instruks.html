@@ -671,7 +671,7 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
 }
 
 // ─── Profil-visualisering ─────────────────────────────────────────────────────
-function Profil({ lag, bundpejling, forerSections, filterSections, inline }) {
+function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, brondDia, type, inline }) {
   const maks = parseFloat(bundpejling);
   if (!bundpejling || isNaN(maks) || maks <= 0) return null;
   if (!lag.some(l => l.fraDybde != null)) return null;
@@ -686,14 +686,20 @@ function Profil({ lag, bundpejling, forerSections, filterSections, inline }) {
   ].filter(Boolean);
   const maksDia = allDias.length > 0 ? Math.max(...allDias) : 200;
 
-  // Byg liste af alle diameter-zoner (forerør + filter) til at tegne profil-konturen
+  // Brønd-zone øverst (0 til brondDybde m.u.t.) hvis boring_med_brønd
+  const harBrond = type === "boring_med_brønd" && brondDybde > 0 && brondDia > 0;
+
+  // Byg liste af alle diameter-zoner til at tegne profil-konturen
   const diaZoner = [];
+  if (harBrond) {
+    diaZoner.push({ fra: 0, til: brondDybde, dia: brondDia, erBrond: true });
+  }
   for (const fr of (forerSections || [])) {
-    diaZoner.push({ fra: fr.top, til: fr.bund, dia: fr.dia });
+    // Forerørs-top justeres med brondDybde for boring_med_brønd
+    diaZoner.push({ fra: fr.top + brondDybde, til: fr.bund + brondDybde, dia: fr.dia });
   }
   for (const fs of (filterSections || [])) {
-    // Filter overskrider forerør – bruges som indre zone
-    diaZoner.push({ fra: fs.fra, til: fs.til, dia: fs.dia });
+    diaZoner.push({ fra: fs.fra + brondDybde, til: fs.til + brondDybde, dia: fs.dia });
   }
   diaZoner.sort((a, b) => a.fra - b.fra);
 
@@ -730,9 +736,19 @@ function Profil({ lag, bundpejling, forerSections, filterSections, inline }) {
               const x  = Math.round((MAXW + 40 - w) / 2);
               return (
                 <rect key={i} x={x} y={y1} width={w} height={y2 - y1}
-                  fill={C.blue3} stroke={C.blue4} strokeWidth={1} />
+                  fill={z.erBrond ? "#dceeff" : C.blue3}
+                  stroke={z.erBrond ? "#2980b9" : C.blue4}
+                  strokeWidth={z.erBrond ? 2 : 1}
+                  strokeDasharray={z.erBrond ? "none" : "none"} />
               );
             })}
+            {/* Brønd-boring overgang: vandret linje */}
+            {harBrond && (
+              <line
+                x1={0} y1={brondDybde / maks * H}
+                x2={MAXW + 40} y2={brondDybde / maks * H}
+                stroke="#2980b9" strokeWidth={2} strokeDasharray="5,3" />
+            )}
             {/* Diameter-skift linjer */}
             {diaZoner.slice(0, -1).map((z, i) => {
               const y = z.til / maks * H;
@@ -805,6 +821,9 @@ function Profil({ lag, bundpejling, forerSections, filterSections, inline }) {
           <div style={{ marginTop: 12, fontSize: 10, color: C.text2,
             borderTop: "1px solid " + C.blue4, paddingTop: 6 }}>
             ▲ 0 m &nbsp;·&nbsp; ▼ {maks} m.u.t.
+            {harBrond && <div style={{ color: "#2980b9", fontWeight: 600 }}>
+              Brønd: 0–{brondDybde} m.u.t. (Ø{brondDia} mm)
+            </div>}
             {forerSections?.length > 0 && <div>
               {forerSections.map((fr, i) =>
                 <span key={i} style={{ marginRight: 8 }}>
@@ -856,9 +875,11 @@ function App() {
   const updP = (k, v) => setProjekt(p => ({ ...p, [k]: v }));
 
   const primær = boringer[0];
+  // Bundpejling: for boring_med_brønd bruges boringsdybden (brønden er en del af profilen)
   const bundpejling = primær.bundpejling ||
     (primær.type === "brønd" ? primær.brondDybde : primær.totaldybde) || null;
-  // Sørg for at forerSections/filterSections er tilgængelige
+  const brondDybde = primær.type === "boring_med_brønd"
+    ? (parseFloat(primær.brondDybde) || 0) : 0;
   const forerSections  = primær.forerSections  || [];
   const filterSections = primær.filterSections || [];
   const beregnetLag = beregnLag(lag, bundpejling, primær);
@@ -1032,7 +1053,10 @@ function App() {
           </button>
           <Profil lag={beregnetLag} bundpejling={bundpejling}
             forerSections={primær.forerSections}
-            filterSections={primær.filterSections} />
+            filterSections={primær.filterSections}
+            brondDybde={brondDybde}
+            brondDia={parseFloat(primær.brondDia) || 0}
+            type={primær.type} />
           <div style={{ marginTop: 16 }}>
             <button style={btn()} onClick={() => setFane("grej")}>
               Næste: Grej →
