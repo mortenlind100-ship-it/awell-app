@@ -9,7 +9,7 @@ module.exports = async (req, res) => {
   // ?raw=borid  — return raw borerapport HTML for inspection
   if (req.query.raw) {
     try {
-      const r = await fetch(`https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${req.query.raw}`, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+      const r = await fetch(`https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${req.query.raw}`, { headers: hdrs, signal: AbortSignal.timeout(3000) });
       const t = await r.text();
       res.setHeader("Content-Type","text/html");
       return res.status(r.status).send(t);
@@ -19,7 +19,7 @@ module.exports = async (req, res) => {
   // ?cyklo=borid  — return raw cyklogram for inspection  
   if (req.query.cyklo) {
     try {
-      const r = await fetch(`https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=${req.query.cyklo}`, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+      const r = await fetch(`https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=${req.query.cyklo}`, { headers: hdrs, signal: AbortSignal.timeout(3000) });
       const t = await r.text();
       res.setHeader("Content-Type", r.headers.get("content-type") || "text/plain");
       return res.status(r.status).send(t);
@@ -29,7 +29,7 @@ module.exports = async (req, res) => {
   // ?links=borid — extract all hrefs and PDF references from borerapport HTML
   if (req.query.links) {
     try {
-      const r = await fetch(`https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${req.query.links}`, { headers: hdrs, signal: AbortSignal.timeout(15000) });
+      const r = await fetch(`https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${req.query.links}`, { headers: hdrs, signal: AbortSignal.timeout(3000) });
       const t = await r.text();
       // Extract all href and src attributes
       const hrefs = [...t.matchAll(/href=["']([^"']+)["']/gi)].map(m=>m[1]);
@@ -53,7 +53,7 @@ module.exports = async (req, res) => {
     ];
     for (const u of candidates) {
       try {
-        const r = await fetch(u, { method:"HEAD", headers: hdrs, signal: AbortSignal.timeout(6000) });
+        const r = await fetch(u, { method:"HEAD", headers: hdrs, signal: AbortSignal.timeout(2000) });
         if (r.ok && (r.headers.get("content-type")||"").toLowerCase().includes("pdf")) {
           res.setHeader("Location", u);
           return res.status(302).end();
@@ -97,7 +97,7 @@ module.exports = async (req, res) => {
 
   try {
     const url = `https://data.geus.dk/JupiterWWW/borerapport.jsp?dgunr=${encodeURIComponent(dgu)}`;
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(15000), redirect: "follow" });
+    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(4000), redirect: "follow" });
     const text = await r.text();
 
     // Extract borid from page content
@@ -121,31 +121,39 @@ module.exports = async (req, res) => {
     return res.status(404).json({ error: `Ingen boring fundet for DGU ${dgu}` });
   }
 
-  // ── Step 2: Fetch WFS data by FEATUREID (fast - primary key lookup) ───────────
+  // ── Step 2+3: WFS og borerapport HTML køres PARALLELT ──────────────────────
+  // Vercel hobby-plan: 10s limit. Parallel udførelse er afgørende.
   let bf = {};
   let utmx = null, utmy = null;
-  try {
-    const wfsUrl = `https://data.geus.dk/geusmap/ows/25832.jsp?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&FEATUREID=jupiter_boringer_ws.${borid}`;
-    const r = await fetch(wfsUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(15000) });
-    const t = await r.text();
-    if (r.ok && t.includes("featureMember")) {
-      bf = allFields(t);
-      [utmx, utmy] = gCoords(t);
-    }
-  } catch(_) {}
 
-  // ── Step 3: Hent borerapport HTML via borid (altid - sikrer vi får den rigtige side) ────
-  try {
-    const reportUrl = `https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=${borid}`;
-    const r = await fetch(reportUrl, { headers: hdrs, signal: AbortSignal.timeout(20000) });
-    if (r.ok) {
-      const t = await r.text();
-      // Verificer at vi har en rigtig borerapport
-      if (t.includes("Forerør") || t.includes("Vandstand") || t.includes("Boringsopbygning")) {
-        boreholeHtml = t;
-      }
-    }
-  } catch(_) {}
+  await Promise.allSettled([
+    // Step 2: WFS FEATUREID (hurtigt primærnøgle-opslag)
+    (async () => {
+      try {
+        const wfsUrl = "https://data.geus.dk/geusmap/ows/25832.jsp?SERVICE=WFS&VERSION=1.0.0&REQUEST=GetFeature&typeName=jupiter_boringer_ws&FEATUREID=jupiter_boringer_ws." + borid;
+        const r = await fetch(wfsUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(6000) });
+        const t = await r.text();
+        if (r.ok && t.includes("featureMember")) {
+          bf = allFields(t);
+          [utmx, utmy] = gCoords(t);
+        }
+      } catch(_) {}
+    })(),
+    // Step 3: Borerapport HTML via borid (rig scraping-kilde)
+    (async () => {
+      if (boreholeHtml) return; // Step 1 gav os allerede en god rapport
+      try {
+        const reportUrl = "https://data.geus.dk/JupiterWWW/borerapport.jsp?borid=" + borid;
+        const r = await fetch(reportUrl, { headers: hdrs, signal: AbortSignal.timeout(7000) });
+        if (r.ok) {
+          const t = await r.text();
+          if (t.includes("Forerør") || t.includes("Vandstand") || t.includes("Boringsopbygning")) {
+            boreholeHtml = t;
+          }
+        }
+      } catch(_) {}
+    })(),
+  ]);
 
   // Extract key data from HTML
   let htmlData = {};
@@ -340,7 +348,7 @@ module.exports = async (req, res) => {
   if (litho.length === 0) {
     try {
       const cUrl = `https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=${borid}`;
-      const cr = await fetch(cUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(10000) });
+      const cr = await fetch(cUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(2000) });
       const ct = await cr.text();
       const features = allFeatures(ct);
       for (const f of features) {
@@ -361,7 +369,7 @@ module.exports = async (req, res) => {
     for (const link of [...pdfMatches, ...iframeMatches]) {
       const absUrl = link.startsWith("http") ? link : `https://data.geus.dk${link.startsWith("/") ? "" : "/JupiterWWW/"}${link}`;
       try {
-        const r = await fetch(absUrl, { method:"HEAD", headers: wfsHdrs, signal: AbortSignal.timeout(5000) });
+        const r = await fetch(absUrl, { method:"HEAD", headers: wfsHdrs, signal: AbortSignal.timeout(2000) });
         if (r.ok && (r.headers.get("content-type")||"").toLowerCase().includes("pdf")) { pdfUrl = absUrl; break; }
       } catch(_) {}
     }
@@ -377,7 +385,7 @@ module.exports = async (req, res) => {
       `https://data.geus.dk/JupiterWWW/Redigering/Dokumenter/${dgu.replace(/\./g,"")}.pdf`,
     ]) {
       try {
-        const r = await fetch(u, { method:"HEAD", headers: wfsHdrs, signal: AbortSignal.timeout(4000) });
+        const r = await fetch(u, { method:"HEAD", headers: wfsHdrs, signal: AbortSignal.timeout(2000) });
         if (r.ok && (r.headers.get("content-type")||"").toLowerCase().includes("pdf")) { pdfUrl = u; break; }
       } catch(_) {}
     }
