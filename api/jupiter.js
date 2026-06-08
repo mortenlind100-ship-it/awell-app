@@ -212,51 +212,41 @@ module.exports = async (req, res) => {
     // Problemet: "top" og "bund" forekommer to gange i headeren.
     // Løsning: lav vores eget row-parse der tager kolonner ved INDEX.
     const filterAllRows = filterRows.filter(r => r.length >= 4);
-    if (filterAllRows.length < 2) {
-      var filterSections = [];
-      var filterSectionsUniq = [];
-    } else {
-      // Header-række til at finde Diameter og Periode kolonne-index
-      const fHeaders = filterAllRows[0].map(h2 => h2.toLowerCase().replace(/[()* ]/g, ""));
-      const diaIdx     = fHeaders.findIndex(h2 => h2.includes("diameter"));
-      const periodeIdx = fHeaders.findIndex(h2 => h2.includes("periode"));
-      const materIdx   = fHeaders.findIndex(h2 => h2.includes("mater"));
-      // Top* er kolonne index 2, Bund* er kolonne index 3 (0-baseret, efter Stamme og Indtagsnr)
-      const topIdx  = 2;
-      const bundIdx = 3;
 
-      var filterSections = filterAllRows.slice(1).map(r => {
+    // Parse filter-sektioner: kun aktive perioder (periode slutter med " -")
+    let filterSections = [];
+    let filterSectionsUniq = [];
+
+    if (filterAllRows.length >= 2) {
+      const fHeaders    = filterAllRows[0].map(h2 => h2.toLowerCase().replace(/[()* ]/g, ""));
+      const diaIdx      = fHeaders.findIndex(h2 => h2.includes("diameter"));
+      const periodeIdx  = fHeaders.findIndex(h2 => h2.includes("periode"));
+      const materIdx    = fHeaders.findIndex(h2 => h2.includes("mater"));
+      const topIdx  = 2;   // Top* (m u.t.) er altid kolonne 2 (efter Stamme, Indtagsnr)
+      const bundIdx = 3;   // Bund* (m u.t.) er altid kolonne 3
+
+      const alleRaekker = filterAllRows.slice(1).map(r => {
         const periode = periodeIdx >= 0 ? (r[periodeIdx] || "").trim() : "";
-        // Aktiv = perioden slutter med " -" og har IKKE en slutdato efter bindestregen
-        const aktiv = /\s*-\s*$/.test(periode);
         return {
           fra:       parseFloat((r[topIdx]  || "").replace(",", ".")) || 0,
           til:       parseFloat((r[bundIdx] || "").replace(",", ".")) || 0,
           dia:       parseFloat((diaIdx >= 0 ? r[diaIdx] : "").replace(",", ".")) || 0,
           materiale: materIdx >= 0 ? (r[materIdx] || "").trim() : "",
           periode,
-          aktiv,
+          // Aktiv = perioden slutter med " -" (åben slutdato = stadig aktiv)
+          aktiv: /[-–]\s*$/.test(periode),
         };
-      }).filter(s => s.dia > 0 && s.til > 0 && s.aktiv);
+      }).filter(s => s.dia > 0 && s.til > 0);
 
-      // Deduplikér (samme fra+til+dia)
-      var filterSectionsUniq = filterSections.filter((s, i, arr) =>
+      // Forsøg 1: kun aktive perioder
+      const aktive = alleRaekker.filter(s => s.aktiv);
+      const kandidater = aktive.length > 0 ? aktive : alleRaekker;
+
+      // Deduplikér på fra+til+dia
+      filterSectionsUniq = kandidater.filter((s, i, arr) =>
         arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
       );
-
-      // Hvis ingen aktive perioder fundet (ældre boringer har muligvis ikke periodedata),
-      // fald tilbage til alle sektioner deduplikeret
-      if (filterSectionsUniq.length === 0) {
-        filterSectionsUniq = filterAllRows.slice(1).map(r => ({
-          fra:  parseFloat((r[topIdx]  || "").replace(",", ".")) || 0,
-          til:  parseFloat((r[bundIdx] || "").replace(",", ".")) || 0,
-          dia:  parseFloat((diaIdx >= 0 ? r[diaIdx] : "").replace(",", ".")) || 0,
-          materiale: materIdx >= 0 ? (r[materIdx] || "").trim() : "",
-        })).filter((s, i, arr) =>
-          s.dia > 0 && s.til > 0 &&
-          arr.findIndex(x => x.fra === s.fra && x.til === s.til && x.dia === s.dia) === i
-        );
-      }
+      filterSections = filterSectionsUniq;
     }
 
     // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
