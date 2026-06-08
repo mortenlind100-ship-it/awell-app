@@ -91,34 +91,64 @@ module.exports = async (req, res) => {
     return rows;
   };
 
-  // ── Step 1: Find borid via borerapport.jsp?dgunr= ────────────────────────────
+  // ── Step 1: Find borid – prøver to metoder parallelt ────────────────────────
+  // Metode A: borerapport.jsp?dgunr= (redirecter til ?borid=XXXX)
+  // Metode B: WFS CQL-filter på txt_search (direkte DB-opslag, meget hurtigt)
+  // Den første der returnerer borid vinder.
   let borid = null;
   let boreholeHtml = null;
 
+  const extractBorid = (text, url) => {
+    return (url && url.match(/borid=(\d+)/))?.[1]
+        || text.match(/borid=(\d+)/i)?.[1]
+        || text.match(/get_cyklogram\.jsp\?borid=(\d+)/)?.[1]
+        || text.match(/borerapport\.jsp\?borid=(\d+)/)?.[1]
+        || text.match(/jupiter_boringer_ws\.(\d+)/)?.[1];
+  };
+
+  const isRealReport = (t) =>
+    t.includes("Boringsopbygning") || t.includes("Forerør") || t.includes("Vandstand");
+
   try {
-    const url = `https://data.geus.dk/JupiterWWW/borerapport.jsp?dgunr=${encodeURIComponent(dgu)}`;
-    const r = await fetch(url, { headers: hdrs, signal: AbortSignal.timeout(4000), redirect: "follow" });
-    const text = await r.text();
+    // Kør begge opslag parallelt – tag første gyldige borid
+    const dguFloat = parseFloat(dgu.replace(/[A-Za-z]+$/, ""));
+    const wfsCqlUrl = "https://data.geus.dk/geusmap/ows/25832.jsp?SERVICE=WFS&VERSION=1.0.0"
+      + "&REQUEST=GetFeature&typeName=jupiter_boringer_ws&maxFeatures=1&OUTPUTFORMAT=GML2"
+      + "&CQL_FILTER=dgunr=" + dguFloat;
 
-    // Extract borid from page content
-    borid = r.url.match(/borid=(\d+)/)?.[1]
-         || text.match(/borid=(\d+)/i)?.[1]
-         || text.match(/get_cyklogram\.jsp\?borid=(\d+)/)?.[1]
-         || text.match(/borerapport\.jsp\?borid=(\d+)/)?.[1];
+    const boreholdUrl = "https://data.geus.dk/JupiterWWW/borerapport.jsp?dgunr=" + encodeURIComponent(dgu);
 
-    // Gem kun HTML hvis det er selve borerapporten (ikke en søgeliste)
-    // En rigtig borerapport indeholder "Boringsopbygning" eller "Forerør"
-    if (borid && r.status === 200 && text.length > 1000
-        && (text.includes("Boringsopbygning") || text.includes("Forerør") || text.includes("Vandstand"))) {
-      boreholeHtml = text;
+    const [htmlResult, wfsResult] = await Promise.allSettled([
+      fetch(boreholdUrl, { headers: hdrs, signal: AbortSignal.timeout(8000), redirect: "follow" })
+        .then(async r => ({ text: await r.text(), url: r.url, ok: r.ok })),
+      fetch(wfsCqlUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(6000) })
+        .then(async r => ({ text: await r.text(), ok: r.ok })),
+    ]);
+
+    // Forsøg borid fra HTML (metode A)
+    if (htmlResult.status === "fulfilled" && htmlResult.value.ok) {
+      const { text, url } = htmlResult.value;
+      const bid = extractBorid(text, url);
+      if (bid) {
+        borid = bid;
+        if (text.length > 1000 && isRealReport(text)) {
+          boreholeHtml = text;
+        }
+      }
     }
-    // Ellers: borid er fundet men siden er en søgeliste - boreholeHtml hentes i Step 3
+
+    // Forsøg borid fra WFS (metode B) – bruges hvis metode A fejlede
+    if (!borid && wfsResult.status === "fulfilled" && wfsResult.value.ok) {
+      const bid = extractBorid(wfsResult.value.text, null);
+      if (bid) borid = bid;
+    }
+
   } catch(e) {
-    return res.status(502).json({ error: "Kunne ikke kontakte GEUS: " + e.message });
+    // Uventet fejl
   }
 
   if (!borid) {
-    return res.status(404).json({ error: `Ingen boring fundet for DGU ${dgu}` });
+    return res.status(404).json({ error: "Ingen boring fundet for DGU " + dgu + ". Kontrollér nummeret." });
   }
 
   // ── Step 2+3: WFS og borerapport HTML køres PARALLELT ──────────────────────
