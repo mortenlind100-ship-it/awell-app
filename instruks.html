@@ -84,6 +84,13 @@ const GREJ_KATEGORIER = [
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2, 9); }
 
+// Beregner volumen i liter for en sektion
+function beregnVolumen(diaMm, laengdeM) {
+  if (!diaMm || !laengdeM || diaMm <= 0 || laengdeM <= 0) return null;
+  const r = diaMm / 2 / 1000; // radius i meter
+  return Math.PI * r * r * laengdeM * 1000; // liter
+}
+
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
 function diaVedDybde(dybde, forerSections, filterSections) {
   // Check filter først (indre forerør)
@@ -526,23 +533,28 @@ function BoringKort({ b, i, onChange, onFjern }) {
             {(b.forerSections && b.forerSections.length > 0) ? (
               <div style={{ background: C.white, border: "1px solid " + C.blue4,
                 borderRadius: 6, overflow: "hidden", fontSize: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
                   background: C.blue3, padding: "5px 10px", fontWeight: 700,
                   color: C.blue, fontSize: 11, fontFamily: "'Montserrat',sans-serif" }}>
                   <span>Top (m.u.t.)</span><span>Bund (m.u.t.)</span>
                   <span>Diameter (mm)</span><span>Materiale</span>
+                  <span>Volumen (L)</span>
                 </div>
-                {b.forerSections.map((s, i) => (
+                {b.forerSections.map((s, i) => {
+                  const vol = beregnVolumen(s.dia, s.bund - s.top);
+                  return (
                   <div key={i} style={{ display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
                     padding: "6px 10px",
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.top}</span><span>{s.bund}</span>
                     <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
                     <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
+                    <span style={{ fontWeight: 600, color: C.blue }}>{vol ? vol.toFixed(1) + " L" : "–"}</span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -560,23 +572,28 @@ function BoringKort({ b, i, onChange, onFjern }) {
             {(b.filterSections && b.filterSections.length > 0) ? (
               <div style={{ background: C.white, border: "1px solid " + C.blue4,
                 borderRadius: 6, overflow: "hidden", fontSize: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
                   background: C.blue3, padding: "5px 10px", fontWeight: 700,
                   color: C.blue, fontSize: 11, fontFamily: "'Montserrat',sans-serif" }}>
                   <span>Top (m.u.t.)</span><span>Bund (m.u.t.)</span>
                   <span>Diameter (mm)</span><span>Materiale</span>
+                  <span>Volumen (L)</span>
                 </div>
-                {b.filterSections.map((s, i) => (
+                {b.filterSections.map((s, i) => {
+                  const vol = beregnVolumen(s.dia, s.til - s.fra);
+                  return (
                   <div key={i} style={{ display: "grid",
-                    gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                    gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr",
                     padding: "6px 10px",
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.fra}</span><span>{s.til}</span>
                     <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
                     <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
+                    <span style={{ fontWeight: 600, color: C.blue }}>{vol ? vol.toFixed(1) + " L" : "–"}</span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
