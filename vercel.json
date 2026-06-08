@@ -1,5 +1,10 @@
 {
-    "rewrites": [
+  "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ]
+  ],
+  "functions": {
+    "api/jupiter.js": {
+      "maxDuration": 30
+    }
+  }
 }
