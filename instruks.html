@@ -92,38 +92,51 @@ function beregnVolumen(diaMm, laengdeM) {
 }
 
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
-function diaVedDybde(dybde, forerSections, filterSections) {
-  // Check filter først (indre forerør/åben kalk)
+function diaVedDybde(dybde, forerSections, filterSections, brondDybde, brondDia) {
+  // Brønd-zone: 0 til brondDybde m.u.t. – bredeste diameter
+  if (brondDybde > 0 && brondDia > 0 && dybde <= brondDybde) {
+    return brondDia;
+  }
+  // Forerør og filter-dybder er angivet relativt til boring (ikke brønd+boring).
+  // Justér: boring-koordinater starter ved brondDybde m.u.t.
+  const boringDybde = dybde - (brondDybde || 0);
+
+  // Check filter (åben kalk / filter-zone)
   for (const fs of (filterSections || [])) {
-    if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
+    if (boringDybde >= fs.fra && boringDybde <= fs.til) return fs.dia;
   }
-  // Derefter forerør
+  // Forerør
   for (const fr of (forerSections || [])) {
-    if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
+    if (boringDybde >= fr.top && boringDybde <= fr.bund) return fr.dia;
   }
-  // Fallback: under alle kendte sektioner (åben kalk / under forerørets bund)
-  // Brug den inderste/dybeste sektion – enten filter eller forerør
+  // Fallback: under/over alle kendte sektioner
   const allSections = [
     ...(filterSections || []).map(s => ({ dia: s.dia, bund: s.til })),
     ...(forerSections || []).map(s => ({ dia: s.dia, bund: s.bund })),
   ];
   if (allSections.length > 0) {
-    // Find sektionen med størst bund (dybeste)
     const deepest = allSections.reduce((a, b) => b.bund > a.bund ? b : a);
-    if (dybde > deepest.bund) return deepest.dia; // under alle sektioner
-    // Over alle sektioner: brug øverste forerør
+    if (boringDybde > deepest.bund) return deepest.dia;
+    // Over øverste sektion (f.eks. mellem brønd og forerørets top): brug øverste forerør
     const allForer = (forerSections || []);
-    if (allForer.length > 0 && dybde < allForer[0].top) return allForer[0].dia;
+    if (allForer.length > 0) return allForer[0].dia;
   }
   return null;
 }
 
 // Opdeler et lag [fraDybde, tilDybde] i sub-intervaller ved hvert diameter-skift
-function splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections) {
-  // Saml alle breakpoints inden for intervallet
+function splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections, brondDybde) {
+  // Saml alle breakpoints inden for intervallet – inkl. brønd-/boring-grænse
   const breaks = new Set([fraDybde, tilDybde]);
+  // Brønd-grænse: skift fra brønd-diameter til forerørs-diameter
+  if (brondDybde > 0 && brondDybde > fraDybde && brondDybde < tilDybde) {
+    breaks.add(brondDybde);
+  }
   for (const fr of (forerSections || [])) {
-    if (fr.top > fraDybde && fr.top < tilDybde) breaks.add(fr.top);
+    // Forerør-dybder justeres med brondDybde
+    const top = fr.top + (brondDybde || 0);
+    const bund = fr.bund + (brondDybde || 0);
+    if (top > fraDybde && top < tilDybde) breaks.add(top);
     if (fr.bund > fraDybde && fr.bund < tilDybde) breaks.add(fr.bund);
   }
   for (const fs of (filterSections || [])) {
@@ -144,6 +157,10 @@ function beregnLag(lag, bundpejling, primærBoring) {
 
   const forerSections  = primærBoring?.forerSections  || [];
   const filterSections = primærBoring?.filterSections || [];
+  const brondDybde     = (primærBoring?.type === "boring_med_brønd")
+                          ? (parseFloat(primærBoring?.brondDybde) || 0) : 0;
+  const brondDia       = brondDybde > 0
+                          ? (parseFloat(primærBoring?.brondDia) || 0) : 0;
 
   return [...lag].reverse().map(l => {
     const mat = MATERIALER.find(m => m.id === l.material);
@@ -152,8 +169,9 @@ function beregnLag(lag, bundpejling, primærBoring) {
       return { ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [] };
     }
 
-    // Bestem startdiameter (ved nuværende dybde)
-    const startDia = diaVedDybde(dybde - 0.01, forerSections, filterSections)
+    // Bestem startdiameter (ved nuværende dybde) – inkl. brønd-zone
+    const startDia = diaVedDybde(dybde - 0.01, forerSections, filterSections,
+                       brondDybde, brondDia)
                   || parseFloat(l.diaMm) || 0;
     if (startDia <= 0) {
       return { ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [],
@@ -168,9 +186,16 @@ function beregnLag(lag, bundpejling, primærBoring) {
     const fraDybde = Math.max(0, dybde - tykkelse);
     dybde = fraDybde;
 
-    // Split i sub-intervaller ved diametersskift
-    const subLag = splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections)
-      .map(s => ({ ...s, dia: s.dia || startDia }));
+    // Split i sub-intervaller ved diametersskift (inkl. brønd-grænse)
+    const subLag = splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections,
+                     brondDybde)
+      .map(s => {
+        // Hent korrekt diameter for hvert sub-interval
+        const midDybde = (s.fra + s.til) / 2;
+        const subDia = diaVedDybde(midDybde, forerSections, filterSections,
+                         brondDybde, brondDia) || startDia;
+        return { ...s, dia: subDia };
+      });
 
     // Sammensæt diastreng til visning
     const diasArr = [...new Set(subLag.map(s => s.dia).filter(Boolean))];
@@ -255,7 +280,7 @@ function buildProfilTabel(lag, bundpejling) {
   return '<table style="width:100%; border-collapse:collapse; margin-bottom:10pt; font-size:9pt;"><tr>' + celler1 + "</tr><tr>" + celler2 + "</tr></table>";
 }
 
-function buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej) {
+function buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej, bundpejling) {
   const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
   const dato = projekt.datoFra
     ? projekt.datoFra + (projekt.datoTil ? " – " + projekt.datoTil : "")
@@ -916,7 +941,7 @@ function App() {
   const beregnetLag = beregnLag(lag, bundpejling, primær);
 
   function download() {
-    const html = buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej);
+    const html = buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej, bundpejling);
     downloadWord(html, projekt.sagsnummer);
   }
 
