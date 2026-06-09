@@ -14,6 +14,8 @@
     html, body, #root { height: 100%; }
     body { background: #dce8f5; font-family: 'Open Sans', Arial, sans-serif; }
   </style>
+  <!-- jsPDF for PDF generation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
@@ -441,6 +443,342 @@ ${allGrej.length > 0 ? `
 </body></html>`;
 }
 
+function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling, primær) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  const BLUE = [17, 105, 176];
+  const DARK = [26, 43, 60];
+  const GREY = [77, 98, 120];
+  const W = 190; // content width (210 - 10 - 10 margin)
+  let y = 15;
+
+  const addPage = () => { doc.addPage(); y = 15; };
+  const checkY = (need) => { if (y + need > 280) addPage(); };
+
+  // ── Firmanavn + titel ───────────────────────────────────────────────
+  doc.setFontSize(8); doc.setTextColor(...GREY);
+  doc.text("Awell Brøndboring A/S", 10, y); y += 5;
+  doc.setFontSize(20); doc.setTextColor(...BLUE); doc.setFont("helvetica","bold");
+  doc.text("ARBEJDSINSTRUKS – SLØJFNING", 10, y); y += 8;
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.6);
+  doc.line(10, y, 200, y); y += 5;
+  doc.setFontSize(12); doc.setTextColor(...DARK);
+  const titleLine = (projekt.sagsnummer ? projekt.sagsnummer + "  ·  " : "") + (projekt.titel || "Sløjfning");
+  doc.text(titleLine, 10, y); y += 8;
+
+  // Artesisk advarsel
+  if (projekt.artesisk) {
+    doc.setFillColor(253, 232, 232);
+    doc.rect(10, y, W, 8, "F");
+    doc.setFontSize(9); doc.setTextColor(192, 57, 43); doc.setFont("helvetica","bold");
+    doc.text("⚠  ARTESISK BORING – boringen er artesisk (overtryk)", 14, y + 5.5);
+    y += 12; doc.setTextColor(...DARK);
+  }
+
+  // ── Sektion-header hjælper ──────────────────────────────────────────
+  const sektHeader = (title) => {
+    checkY(14);
+    y += 4;
+    doc.setFontSize(12); doc.setFont("helvetica","bold"); doc.setTextColor(...BLUE);
+    doc.text(title, 10, y); y += 2;
+    doc.setDrawColor(...BLUE); doc.setLineWidth(0.4);
+    doc.line(10, y, 200, y); y += 5;
+    doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
+  };
+
+  // Tabel-hjælper (2-kolonne label/værdi)
+  const tabel2 = (rows) => {
+    rows.forEach(([a, b, c, d]) => {
+      checkY(7);
+      doc.setFillColor(240, 246, 252);
+      doc.rect(10, y-4, 45, 6, "F");
+      doc.setFont("helvetica","bold"); doc.text(a, 11, y);
+      doc.setFont("helvetica","normal"); doc.text(String(b || "–"), 57, y);
+      if (c !== undefined) {
+        doc.setFillColor(240, 246, 252);
+        doc.rect(105, y-4, 45, 6, "F");
+        doc.setFont("helvetica","bold"); doc.text(String(c), 106, y);
+        doc.setFont("helvetica","normal"); doc.text(String(d || "–"), 152, y);
+      }
+      y += 7;
+    });
+  };
+
+  // ── 1. Opgaveoversigt ────────────────────────────────────────────────
+  sektHeader("1.  Opgaveoversigt");
+  tabel2([
+    ["Sagsnummer", projekt.sagsnummer, "Titel", projekt.titel],
+    ["Adresse", projekt.adresse, "", ""],
+    ["Kontaktperson", (projekt.kontaktNavn || "") + (projekt.kontaktTlf ? "  ·  " + projekt.kontaktTlf : ""),
+     "Grundejer", (projekt.grundejerNavn || "") + (projekt.grundejerTlf ? "  ·  " + projekt.grundejerTlf : "")],
+    ["DGU-numre", boringer.map(b => b.dgu).filter(Boolean).join(", "),
+     "Dato", projekt.datoFra || "–"],
+  ]);
+
+  if (projekt.opgaveBeskrivelse) {
+    checkY(8);
+    doc.setFont("helvetica","bold"); doc.text("Opgave:", 10, y);
+    doc.setFont("helvetica","normal");
+    const lines = doc.splitTextToSize(projekt.opgaveBeskrivelse, 150);
+    doc.text(lines, 35, y); y += lines.length * 5 + 3;
+  }
+
+  // ── 2. Boringer ──────────────────────────────────────────────────────
+  sektHeader("2.  Boringer og brønde");
+  const typeLabel = t => ({boring:"Boring",brønd:"Brønd",boring_med_brønd:"Boring + brønd"}[t]||t);
+
+  boringer.forEach((bo, i) => {
+    checkY(10);
+    doc.setFont("helvetica","bold"); doc.setFontSize(10); doc.setTextColor(...BLUE);
+    doc.text((i+1) + ".  DGU " + (bo.dgu||"–") + "  ·  " + typeLabel(bo.type), 10, y);
+    y += 6; doc.setFontSize(9); doc.setTextColor(...DARK);
+
+    const forerDia = bo.forerDiaFelt || bo.forerDia || "–";
+    const forerBund = bo.forerBundFelt || bo.forerBund || "–";
+    const rovand = bo.rovandspejlFelt || bo.rovandspejl || "–";
+    const dybde = bo.bundpejling || bo.totaldybde || "–";
+
+    if (bo.type !== "brønd") {
+      tabel2([
+        ["Dybde (m.u.t.)", dybde, "Seneste pejling", rovand],
+        ["Forerør Ø (mm)", forerDia, "Forerør bund (m.u.t.)", forerBund],
+      ]);
+      // Forerør sektioner tabel
+      if (bo.forerSections && bo.forerSections.length > 0) {
+        checkY(14);
+        doc.setFont("helvetica","bold");
+        doc.setFillColor(220, 232, 244);
+        doc.rect(10, y-4, W, 6, "F");
+        doc.text("Forerør – sektioner", 11, y); y += 7;
+        doc.setFont("helvetica","normal");
+        bo.forerSections.forEach(s => {
+          checkY(6);
+          const vol = Math.PI * Math.pow(s.dia/2/1000, 2) * (s.bund - s.top) * 1000;
+          doc.text(s.top + " – " + s.bund + " m.u.t.", 12, y);
+          doc.setFont("helvetica","bold"); doc.text("Ø" + s.dia + " mm", 80, y); doc.setFont("helvetica","normal");
+          doc.text(s.materiale || "–", 115, y);
+          doc.text(vol.toFixed(1) + " L", 165, y);
+          y += 6;
+        });
+      }
+      // Filter sektioner tabel
+      if (bo.filterSections && bo.filterSections.length > 0) {
+        checkY(14);
+        doc.setFont("helvetica","bold");
+        doc.setFillColor(220, 232, 244);
+        doc.rect(10, y-4, W, 6, "F");
+        doc.text("Filtre – sektioner", 11, y); y += 7;
+        doc.setFont("helvetica","normal");
+        bo.filterSections.forEach(s => {
+          checkY(6);
+          const vol = Math.PI * Math.pow(s.dia/2/1000, 2) * (s.til - s.fra) * 1000;
+          doc.text(s.fra + " – " + s.til + " m.u.t.", 12, y);
+          doc.setFont("helvetica","bold"); doc.text("Ø" + s.dia + " mm", 80, y); doc.setFont("helvetica","normal");
+          doc.text(s.materiale || "–", 115, y);
+          doc.text(vol.toFixed(1) + " L", 165, y);
+          y += 6;
+        });
+      }
+    }
+    if (bo.type !== "boring") {
+      tabel2([["Brønd Ø (mm)", bo.brondDia || "–", "Brønd dybde (m.u.t.)", bo.brondDybde || "–"]]);
+    }
+    if (bo.noter) {
+      checkY(8);
+      doc.setFillColor(232, 244, 232);
+      const noteLines = doc.splitTextToSize("ℹ  " + bo.noter, W - 8);
+      doc.rect(10, y-4, W, noteLines.length * 5 + 4, "F");
+      doc.text(noteLines, 14, y); y += noteLines.length * 5 + 5;
+    }
+    y += 3;
+  });
+
+  // ── 3. Sløjfningsprofil + sekvens ────────────────────────────────────
+  sektHeader("3.  Sløjfningsprofil og sekvens");
+
+  // Tegn profil med jsPDF
+  const gyldig = beregnetLag.filter(l => l.fraDybde != null);
+  if (gyldig.length > 0 && bundpejling) {
+    const maks = parseFloat(bundpejling);
+    const profH = 80; // mm høj
+    const profX = 10;
+    const profW_max = 25; // mm bred (max = brønd)
+    const harBrond = primær.type === "boring_med_brønd" && primær.brondDia > 0;
+    const maksDia = harBrond ? parseFloat(primær.brondDia) : 
+      Math.max(...(primær.forerSections||[]).map(s=>s.dia), ...(primær.filterSections||[]).map(s=>s.dia), 200);
+
+    checkY(profH + 20);
+
+    // Terræn-linje
+    doc.setDrawColor(26,43,60); doc.setLineWidth(1);
+    doc.line(profX, y, profX + profW_max + 2, y);
+
+    // Tegn hver underlag
+    const matFarver = {
+      bentonit_pellets: [107,142,35], bentonit_grout: [139,115,85],
+      cementgrout: [169,169,169], filtersand: [232,200,74],
+      aertesten: [210,180,140], stabilgrus: [200,184,154],
+      brogrus: [184,168,152], muld: [93,64,55], cement_stolpe: [128,128,128]
+    };
+
+    gyldig.forEach(l => {
+      const subs = l.subLag && l.subLag.length > 0
+        ? l.subLag : [{ fra: l.fraDybde, til: l.tilDybde, dia: parseFloat(l.diaMm) || maksDia }];
+      const farve = matFarver[l.material] || [180,180,180];
+      doc.setFillColor(...farve);
+      subs.forEach(s => {
+        const subW = Math.max(2, (s.dia / maksDia) * profW_max);
+        const subX = profX + (profW_max - subW) / 2;
+        const sy = y + (s.fra / maks) * profH;
+        const sh = Math.max(0.5, (s.til - s.fra) / maks * profH);
+        doc.rect(subX, sy, subW, sh, "F");
+      });
+    });
+
+    // Ramme rundt om profil
+    doc.setDrawColor(...BLUE); doc.setLineWidth(0.3);
+    doc.rect(profX, y, profW_max, profH);
+
+    // Dybde-labels til venstre
+    doc.setFontSize(7); doc.setTextColor(...GREY);
+    [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+      const yd = y + f * profH;
+      doc.text((f * maks).toFixed(1), profX - 7, yd + 1);
+      doc.setDrawColor(200,200,200); doc.setLineWidth(0.1);
+      doc.line(profX, yd, profX + profW_max, yd);
+    });
+    doc.setTextColor(...GREY); doc.setFontSize(7);
+    doc.text("m.u.t.", profX - 7, y - 2);
+
+    // Legende til højre
+    const legX = profX + profW_max + 6;
+    let legY = y + 3;
+    doc.setFontSize(8); doc.setTextColor(...DARK);
+    gyldig.forEach(l => {
+      const farve = matFarver[l.material] || [180,180,180];
+      doc.setFillColor(...farve);
+      doc.rect(legX, legY - 3, 4, 4, "F");
+      doc.setFont("helvetica","bold"); doc.setFontSize(8);
+      const matNavn = { bentonit_pellets:"Bentonit pellets", bentonit_grout:"Bentonit grout",
+        cementgrout:"Cementgrout", filtersand:"Filtersand", aertesten:"Ærtesten",
+        stabilgrus:"Stabilgrus", brogrus:"Brogrus", muld:"Muld", cement_stolpe:"Stolpebeton"
+      }[l.material] || l.material;
+      doc.text(matNavn, legX + 6, legY);
+      doc.setFont("helvetica","normal"); doc.setFontSize(7); doc.setTextColor(...GREY);
+      doc.text(l.fraDybde.toFixed(2) + " – " + l.tilDybde.toFixed(2) + " m  ·  " + l.kg + " kg"
+        + (l.diaStr ? "  ·  Ø " + l.diaStr : ""), legX + 6, legY + 4);
+      doc.setTextColor(...DARK);
+      legY += 11;
+    });
+
+    y += profH + 8;
+  }
+
+  // ── Sekvenstabel ─────────────────────────────────────────────────────
+  checkY(20);
+  const matNavn2 = { bentonit_pellets:"Bentonit pellets", bentonit_grout:"Bentonit grout",
+    cementgrout:"Cementgrout", filtersand:"Filtersand", aertesten:"Ærtesten",
+    stabilgrus:"Stabilgrus", brogrus:"Brogrus", muld:"Muld", cement_stolpe:"Stolpebeton" };
+
+  doc.setFillColor(220,232,244);
+  doc.rect(10, y-4, W, 6, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...BLUE);
+  ["#","Materiale","Fra (m.u.t.)","Til (m.u.t.)","Tykkelse (m)","Mængde (kg)"].forEach((h, i) => {
+    const xs = [10,18,85,115,145,170];
+    doc.text(h, xs[i], y);
+  });
+  y += 7;
+  doc.setTextColor(...DARK); doc.setFont("helvetica","normal");
+
+  beregnetLag.forEach((l, i) => {
+    checkY(7);
+    const bg = i % 2 === 0;
+    if (!bg) { doc.setFillColor(248,251,254); doc.rect(10, y-4, W, 6, "F"); }
+    const matN = matNavn2[l.material] || l.material;
+    doc.setFont("helvetica","bold"); doc.text(String(i+1), 11, y); doc.setFont("helvetica","normal");
+    doc.text(matN, 18, y);
+    doc.text(l.fraDybde != null ? l.fraDybde.toFixed(2) : "–", 85, y);
+    doc.text(l.tilDybde != null ? l.tilDybde.toFixed(2) : "–", 115, y);
+    doc.text(l.tykkelse != null ? l.tykkelse.toFixed(2) : "–", 145, y);
+    doc.setFont("helvetica","bold"); doc.text(String(l.kg || "–"), 170, y);
+    y += 7;
+  });
+
+  y += 2;
+  checkY(7);
+  doc.setFillColor(220,232,244);
+  doc.rect(10, y-4, W, 6, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...BLUE);
+  doc.text("HUSK: Tilfør vand undervejs efterhånden som bentonit kvæller", 11, y);
+  y += 10; doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(...DARK);
+
+  // ── 4. Opgaven ────────────────────────────────────────────────────────
+  sektHeader("4.  Opgaven");
+  const opgaver = [];
+  if (projekt.pumpeSkalTraekkes) opgaver.push("Adskil installation og træk pumpe og stigrør");
+  opgaver.push("Foretag bundpejling og registrér (m.u.t.)");
+  opgaver.push("Foretag rovandspejling og registrér (m.u.t.)");
+  opgaver.push("Sløjf boring/brønd med materialer som angivet i sekvensen");
+  opgaver.push("Tilfør vand undervejs efterhånden som bentonit kvæller");
+  opgaver.push("Nedskær forerør til 1 m.u.t. og retablér terræn");
+  opgaver.push("Tag vandprøve – undgå beskidt overfladevand. Skriv DGU-nummer på prøve");
+  opgaver.push("Aflever vandprøve i firmaet");
+  opgaver.push("Tag dokumentationsbilleder som angivet");
+  opgaver.forEach((t, i) => {
+    checkY(7);
+    doc.text((i+1) + ". " + t, 12, y); y += 6;
+  });
+
+  // ── 5. Materialer ─────────────────────────────────────────────────────
+  sektHeader("5.  Materialer og forventet forbrug");
+  const aggr = {};
+  beregnetLag.forEach(l => {
+    const n = matNavn2[l.material] || l.material;
+    aggr[n] = (aggr[n] || 0) + (parseFloat(l.kg) || 0);
+  });
+  Object.entries(aggr).forEach(([n, kg]) => {
+    checkY(7);
+    doc.text(n, 12, y);
+    doc.setFont("helvetica","bold"); doc.text(kg + " kg", 160, y);
+    doc.setFont("helvetica","normal"); y += 6;
+  });
+
+  // ── 6. Grej ───────────────────────────────────────────────────────────
+  const allGrej = [...grej, ...friGrej.split("
+").map(s=>s.trim()).filter(Boolean)];
+  if (allGrej.length > 0) {
+    sektHeader("6.  Grej");
+    allGrej.forEach(e => {
+      checkY(6);
+      doc.text("• " + e, 12, y); y += 5;
+    });
+  }
+
+  // ── 7. Dokumentation ──────────────────────────────────────────────────
+  sektHeader(allGrej.length > 0 ? "7.  Dokumentation" : "6.  Dokumentation");
+  (projekt.dokumentation || "").split("
+").filter(Boolean).forEach(d => {
+    checkY(6);
+    doc.text("• " + d.replace(/^[-•]\s*/,""), 12, y); y += 5;
+  });
+
+  // ── Footer ────────────────────────────────────────────────────────────
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8); doc.setTextColor(...GREY);
+    doc.setDrawColor(200,200,200); doc.setLineWidth(0.2);
+    doc.line(10, 287, 200, 287);
+    doc.text("Awell Brøndboring A/S  ·  Arbejdsinstruks genereret " + new Date().toLocaleDateString("da-DK"), 10, 292);
+    doc.text("Side " + i + " af " + pageCount, 185, 292);
+  }
+
+  // Download
+  const sagsnr = projekt.sagsnummer || "sloejfning";
+  doc.save("Arbejdsinstruks_" + sagsnr + ".pdf");
+}
+
 function downloadWord(html, sagsnummer) {
   const blob = new Blob(["\ufeff" + html], { type: "application/msword; charset=utf-8" });
   const url  = URL.createObjectURL(blob);
@@ -771,17 +1109,19 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
   if (!lag.some(l => l.fraDybde != null)) return null;
 
   const H = inline ? 300 : 280;
-  const MAXW = 80; // max profil-bredde i px
-
-  // Find maks diameter for skalering
-  const allDias = [
-    ...(forerSections || []).map(s => s.dia),
-    ...(filterSections || []).map(s => s.dia),
-  ].filter(Boolean);
-  const maksDia = allDias.length > 0 ? Math.max(...allDias) : 200;
+  const MAXW = 80; // max profil-bredde i px (svarer til største diameter)
 
   // Brønd-zone øverst (0 til brondDybde m.u.t.) hvis boring_med_brønd
   const harBrond = type === "boring_med_brønd" && brondDybde > 0 && brondDia > 0;
+
+  // Find maks boring-diameter for skalering (UDEN brønd – brønd er altid fuld bredde)
+  const boringDias = [
+    ...(forerSections || []).map(s => s.dia),
+    ...(filterSections || []).map(s => s.dia),
+  ].filter(Boolean);
+  const maksBoring = boringDias.length > 0 ? Math.max(...boringDias) : 200;
+  // Brønd er altid bredere end boring – vis brønd som fuld MAXW, boring proportionalt
+  const maksDia = harBrond ? brondDia : maksBoring;
 
   // Byg liste af alle diameter-zoner til at tegne profil-konturen
   const diaZoner = [];
@@ -789,7 +1129,6 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
     diaZoner.push({ fra: 0, til: brondDybde, dia: brondDia, erBrond: true });
   }
   for (const fr of (forerSections || [])) {
-    // Forerørs-top justeres med brondDybde for boring_med_brønd
     diaZoner.push({ fra: fr.top + brondDybde, til: fr.bund + brondDybde, dia: fr.dia });
   }
   for (const fs of (filterSections || [])) {
@@ -797,8 +1136,11 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
   }
   diaZoner.sort((a, b) => a.fra - b.fra);
 
-  // Hjælper: bredde i px ved en given dybde
-  const breddePct = (dia) => Math.max(0.2, (dia || maksDia) / maksDia);
+  // Bredde i px: brønd = MAXW (fuld), boring skaleres proportionalt relativt til brønd
+  const breddePx = (dia) => {
+    if (!dia || dia <= 0) return MAXW * 0.2;
+    return Math.round(Math.max(4, (dia / maksDia) * MAXW));
+  };
 
   return (
     <div style={{ background: C.white, border: "1px solid " + C.blue4,
@@ -826,7 +1168,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
             {diaZoner.map((z, i) => {
               const y1 = z.fra / maks * H;
               const y2 = Math.min(z.til / maks * H, H);
-              const w  = Math.round(breddePct(z.dia) * MAXW);
+              const w  = breddePx(z.dia);
               const x  = Math.round((MAXW + 40 - w) / 2);
               return (
                 <rect key={i} x={x} y={y1} width={w} height={y2 - y1}
@@ -846,15 +1188,15 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
             {/* Diameter-skift linjer */}
             {diaZoner.slice(0, -1).map((z, i) => {
               const y = z.til / maks * H;
-              const w1 = Math.round(breddePct(z.dia) * MAXW);
-              const w2 = Math.round(breddePct(diaZoner[i+1]?.dia) * MAXW);
+              const w1 = breddePx(z.dia);
+              const w2 = breddePx(diaZoner[i+1]?.dia);
               const x1 = Math.round((MAXW + 40 - w1) / 2);
               const x2 = Math.round((MAXW + 40 - w2) / 2);
               return (
                 <g key={"line"+i}>
                   <line x1={x1} y1={y} x2={x2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
                   <line x1={x1+w1} y1={y} x2={x2+w2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
-                  <text x={MAXW+42} y={y+4} fontSize={9} fill={C.blue}>Ø{diaZoner[i+1]?.dia}</text>
+                  <text x={MAXW+4} y={y+4} fontSize={9} fill={C.blue}>Ø{diaZoner[i+1]?.dia}</text>
                 </g>
               );
             })}
@@ -869,7 +1211,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
             return subs.map((s, si) => {
               const y  = s.fra / maks * H;
               const h2 = Math.max((s.til - s.fra) / maks * H, 1.5);
-              const w  = Math.round(breddePct(s.dia) * MAXW) - 2;
+              const w  = breddePx(s.dia) - 2;
               const x  = Math.round((MAXW + 40 - w) / 2);
               return (
                 <div key={i + "-" + si} style={{
@@ -1306,13 +1648,19 @@ function App() {
             </table>
           </div>
 
-          <button onClick={download}
-            style={{ ...btn(), width: "100%", padding: 16, fontSize: 16,
-              boxShadow: "0 3px 12px rgba(17,105,176,0.3)" }}>
-            📄 Download arbejdsinstruks (.doc)
-          </button>
-          <p style={{ fontSize: 12, color: C.text2, textAlign: "center", marginTop: 8 }}>
-            Åbnes i Microsoft Word eller LibreOffice
+          <div style={{ display: "flex", gap: 12, marginBottom: 4 }}>
+            <button onClick={download}
+              style={{ ...btn(), flex: 1, padding: 14, fontSize: 14 }}>
+              📄 Word (.doc)
+            </button>
+            <button onClick={() => downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling, primær)}
+              style={{ ...btn("#E8500A"), flex: 1, padding: 14, fontSize: 14,
+                boxShadow: "0 3px 12px rgba(232,80,10,0.3)" }}>
+              📑 PDF
+            </button>
+          </div>
+          <p style={{ fontSize: 12, color: C.text2, textAlign: "center", marginTop: 4 }}>
+            PDF inkluderer sløjfningsprofil · Word åbnes i Microsoft Word
           </p>
         </>}
 
