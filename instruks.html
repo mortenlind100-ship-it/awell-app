@@ -93,13 +93,27 @@ function beregnVolumen(diaMm, laengdeM) {
 
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
 function diaVedDybde(dybde, forerSections, filterSections) {
-  // Check filter først (indre forerør)
+  // Check filter først (indre forerør/åben kalk)
   for (const fs of (filterSections || [])) {
     if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
   }
   // Derefter forerør
   for (const fr of (forerSections || [])) {
     if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
+  }
+  // Fallback: under alle kendte sektioner (åben kalk / under forerørets bund)
+  // Brug den inderste/dybeste sektion – enten filter eller forerør
+  const allSections = [
+    ...(filterSections || []).map(s => ({ dia: s.dia, bund: s.til })),
+    ...(forerSections || []).map(s => ({ dia: s.dia, bund: s.bund })),
+  ];
+  if (allSections.length > 0) {
+    // Find sektionen med størst bund (dybeste)
+    const deepest = allSections.reduce((a, b) => b.bund > a.bund ? b : a);
+    if (dybde > deepest.bund) return deepest.dia; // under alle sektioner
+    // Over alle sektioner: brug øverste forerør
+    const allForer = (forerSections || []);
+    if (allForer.length > 0 && dybde < allForer[0].top) return allForer[0].dia;
   }
   return null;
 }
