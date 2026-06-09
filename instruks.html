@@ -1138,10 +1138,20 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
   }
   diaZoner.sort((a, b) => a.fra - b.fra);
 
-  // Bredde i px: brønd = MAXW (fuld), boring skaleres proportionalt relativt til brønd
+  // Bredde i px: brønd = MAXW (fuld), boring vises med sqrt-skalering
+  // så selv en lille boring er tydeligt synlig ved siden af en stor brønd.
+  // Minimum boringbredde = 40% af MAXW for god læsbarhed.
+  const MIN_BORING_FRAC = 0.40; // boring fylder mindst 40% af profil-bredden
   const breddePx = (dia) => {
-    if (!dia || dia <= 0) return MAXW * 0.2;
-    return Math.round(Math.max(4, (dia / maksDia) * MAXW));
+    if (!dia || dia <= 0) return Math.round(MAXW * 0.2);
+    if (harBrond && dia < brondDia) {
+      // Boring: sqrt-skalering + minimum
+      const linearFrac = dia / maksDia;
+      const sqrtFrac   = Math.sqrt(linearFrac);
+      const frac = Math.max(MIN_BORING_FRAC, sqrtFrac * 0.85);
+      return Math.round(frac * MAXW);
+    }
+    return Math.round((dia / maksDia) * MAXW); // brønd: fuld bredde
   };
 
   return (
