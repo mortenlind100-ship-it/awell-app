@@ -178,24 +178,62 @@ function beregnLag(lag, bundpejling, primærBoring) {
         diaMm: l.diaMm };
     }
 
-    // Beregn tykkelse med gennemsnitsdiameter (simpel approx – raffineres nedenfor)
-    const r0  = startDia / 2 / 1000;
-    const lpm0 = Math.PI * r0 * r0 * 1000;
-    const tykkelse = (kg / mat.kgPerL) / lpm0;
+    // Beregn tykkelse ITERATIVT fra bunden og op – diameter skifter undervejs
+    // For hvert diameter-interval: beregn hvor mange liter der passer, konverter til meter
     const tilDybde = dybde;
-    const fraDybde = Math.max(0, dybde - tykkelse);
-    dybde = fraDybde;
+    let restKg = kg;
+    let fraDybde = dybde;
+    const subLag = [];
 
-    // Split i sub-intervaller ved diametersskift (inkl. brønd-grænse)
-    const subLag = splitVedDiaSkift(fraDybde, tilDybde, forerSections, filterSections,
-                     brondDybde)
-      .map(s => {
-        // Hent korrekt diameter for hvert sub-interval
-        const midDybde = (s.fra + s.til) / 2;
-        const subDia = diaVedDybde(midDybde, forerSections, filterSections,
-                         brondDybde, brondDia) || startDia;
-        return { ...s, dia: subDia };
-      });
+    // Find alle diameter-skift-punkter fra dybde og opad mod 0
+    // Saml breakpoints: brønd-grænse + forerør-skift + filter-skift
+    const allBreaks = new Set();
+    if (brondDybde > 0) allBreaks.add(brondDybde);
+    (forerSections || []).forEach(fr => {
+      const top = fr.top + brondDybde, bund = fr.bund + brondDybde;
+      allBreaks.add(top); allBreaks.add(bund);
+    });
+    (filterSections || []).forEach(fs => {
+      const fra = fs.fra + brondDybde, til = fs.til + brondDybde;
+      allBreaks.add(fra); allBreaks.add(til);
+    });
+    allBreaks.add(0);
+    // Sortér faldende (dybeste til øverste)
+    const breaksSorted = Array.from(allBreaks).filter(b => b <= dybde).sort((a, b) => b - a);
+
+    for (const bpTop of breaksSorted) {
+      if (restKg <= 0.001) break;
+      const zoneDia = diaVedDybde((fraDybde + bpTop) / 2 + 0.01,
+                        forerSections, filterSections, brondDybde, brondDia)
+                    || startDia;
+      const r = zoneDia / 2 / 1000;
+      const lpm = Math.PI * r * r * 1000;
+      // Volumen tilgængeligt i dette interval (fra fraDybde ned til bpTop)
+      const intervalH = fraDybde - bpTop;
+      const maxKgInterval = intervalH * lpm * mat.kgPerL;
+      const kgHer = Math.min(restKg, maxKgInterval);
+      const hHer = kgHer / (lpm * mat.kgPerL);
+      const subTil = fraDybde;
+      const subFra = Math.max(bpTop, fraDybde - hHer);
+      subLag.unshift({ fra: subFra, til: subTil, dia: zoneDia });
+      fraDybde = subFra;
+      restKg -= kgHer;
+    }
+    // Hvis materiale stadig er tilbage (over alle breakpoints), udstræk til 0
+    if (restKg > 0.001 && fraDybde > 0) {
+      const zoneDia = diaVedDybde(fraDybde / 2, forerSections, filterSections,
+                        brondDybde, brondDia) || startDia;
+      const r = zoneDia / 2 / 1000;
+      const lpm = Math.PI * r * r * 1000;
+      const hRest = restKg / (lpm * mat.kgPerL);
+      const subFra = Math.max(0, fraDybde - hRest);
+      subLag.unshift({ fra: subFra, til: fraDybde, dia: zoneDia });
+      fraDybde = subFra;
+    }
+
+    fraDybde = Math.max(0, fraDybde);
+    const tykkelse = tilDybde - fraDybde;
+    dybde = fraDybde;
 
     // Sammensæt diastreng til visning
     const diasArr = [...new Set(subLag.map(s => s.dia).filter(Boolean))];
