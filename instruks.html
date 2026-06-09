@@ -1138,20 +1138,31 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
   }
   diaZoner.sort((a, b) => a.fra - b.fra);
 
-  // Bredde i px: brønd = MAXW (fuld), boring vises med sqrt-skalering
-  // så selv en lille boring er tydeligt synlig ved siden af en stor brønd.
-  // Minimum boringbredde = 40% af MAXW for god læsbarhed.
-  const MIN_BORING_FRAC = 0.40; // boring fylder mindst 40% af profil-bredden
+  // Bredde i px:
+  // - Brønd: altid MAXW (fuld bredde)
+  // - Boring: skaleres inden for sit eget interval (BORING_MIN til BORING_MAX px)
+  //   så diameterforskelle i boringen stadig er synlige, men boringen er
+  //   aldrig for tynd i forhold til brønden.
+  const BORING_MAX = Math.round(MAXW * 0.70); // max boringbredde = 70% af MAXW
+  const BORING_MIN = Math.round(MAXW * 0.35); // min boringbredde = 35% af MAXW
+
   const breddePx = (dia) => {
-    if (!dia || dia <= 0) return Math.round(MAXW * 0.2);
-    if (harBrond && dia < brondDia) {
-      // Boring: sqrt-skalering + minimum
-      const linearFrac = dia / maksDia;
-      const sqrtFrac   = Math.sqrt(linearFrac);
-      const frac = Math.max(MIN_BORING_FRAC, sqrtFrac * 0.85);
-      return Math.round(frac * MAXW);
+    if (!dia || dia <= 0) return BORING_MIN;
+    if (!harBrond || dia >= brondDia) {
+      return MAXW; // brønd eller ingen brønd: fuld bredde
     }
-    return Math.round((dia / maksDia) * MAXW); // brønd: fuld bredde
+    // Boring: skaler relativt til boringens egne min/max diametre
+    // så forskellen mellem f.eks. Ø195 og Ø165 er synlig
+    const boringDias = [
+      ...(forerSections || []).map(s => s.dia),
+      ...(filterSections || []).map(s => s.dia),
+    ].filter(Boolean);
+    const minBoring = boringDias.length > 0 ? Math.min(...boringDias) : dia;
+    const maxBoring = boringDias.length > 0 ? Math.max(...boringDias) : dia;
+    if (maxBoring <= minBoring) return Math.round((BORING_MIN + BORING_MAX) / 2);
+    // Lineær interpolation inden for boring-interval
+    const frac = (dia - minBoring) / (maxBoring - minBoring);
+    return Math.round(BORING_MIN + frac * (BORING_MAX - BORING_MIN));
   };
 
   return (
