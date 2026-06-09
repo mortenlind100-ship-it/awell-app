@@ -324,9 +324,17 @@ const _jupiterHandler = async (req, res) => {
 
     // Scrape litologi table
     const lithoRows = scrapeTable(h, "litologi");
+    // Jupiter Geologi-tabel kolonner:
+    // Top*(0) | Bund*(1) | Top**(2) | Bund**(3) | DGU-symbol(4) | Beskrivelse(5)
     lithoFromHtml = lithoRows
-      .filter(r => r.length >= 2 && !isNaN(parseFloat(r[0])))
-      .map(r => ({ fraM: r[0], tilM: r[1], tekst: r[2] || r[3] || null, symbol: r[4] || null }));
+      .filter(r => r.length >= 2 && !isNaN(parseFloat((r[0]||"").replace(",","."))))
+      .map(r => ({
+        fraM:       (r[0] || "").replace(",", "."),
+        tilM:       (r[1] || "").replace(",", "."),
+        symbol:     r[4] || r[2] || null,
+        beskrivelse: r[5] || r[3] || r[2] || null,
+        tekst:      r[5] || r[4] || r[2] || null,
+      }));
 
     // Scrape vandstand/pejling table
     const vandRows = scrapeTable(h, "vandstand");
@@ -346,7 +354,7 @@ const _jupiterHandler = async (req, res) => {
       const features = allFeatures(ct);
       for (const f of features) {
         const lf = allFields(f);
-        litho.push({ fraM: lf.fra_m||lf.fra, tilM: lf.til_m||lf.til, tekst: lf.litologi_tekst||lf.tekst||lf.beskrivelse||lf.symbol_tekst, symbol: lf.symbol });
+        litho.push({ fraM: lf.fra_m||lf.fra, tilM: lf.til_m||lf.til, tekst: lf.litologi_tekst||lf.tekst||lf.beskrivelse||lf.symbol_tekst, symbol: lf.symbol, beskrivelse: lf.beskrivelse||lf.litologi_tekst||lf.tekst||null });
       }
     } catch(_) {}
   }
