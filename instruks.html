@@ -1336,18 +1336,21 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
         </div>
         <div>
           <label style={lbl}>Ø (mm)</label>
-          {calc?.diaStr
+          {/* Ø-felt: read-only (blå) kun når diameter er beregnet fra Jupiter-sektioner.
+              Altid redigerbart når ingen Jupiter-data (forerSections tomme). */}
+          {calc?.diaStr && (primær?.forerSections?.length > 0 || primær?.filterSections?.length > 0)
             ? <div style={{ ...inp, background: C.blue3, fontWeight: 600,
                 color: C.blue, fontSize: 12, display: "flex", alignItems: "center",
                 minHeight: 36, cursor: "default" }}>
                 {calc.diaStr}
               </div>
             : <input style={inp} type="number" step="1"
-                value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)}
+                value={lag.diaMm}
+                onChange={e => upd("diaMm", e.target.value)}
                 placeholder="f.eks. 195" />
           }
           <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
-            {calc?.diaStr
+            {calc?.diaStr && (primær?.forerSections?.length > 0 || primær?.filterSections?.length > 0)
               ? "Beregnet fra boring"
               : !lag.diaMm
                 ? <span style={{ color: "#e67e22" }}>⚠ Angiv Ø for at tegne profil</span>
@@ -1370,10 +1373,22 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
 }
 
 // ─── Profil-visualisering ─────────────────────────────────────────────────────
-function beregnBreddePx(dia, harBrond, brondDia, forerSections, filterSections, MAXW, BORING_MIN, BORING_MAX) {
+function beregnBreddePx(dia, harBrond, brondDia, combinedDiasArr, MAXW, BORING_MIN, BORING_MAX) {
   if (!dia || dia <= 0) return BORING_MIN;
-  if (!harBrond || dia >= brondDia) return MAXW;
-  var arr = (forerSections || []).map(function(s){return s.dia;}).concat((filterSections || []).map(function(s){return s.dia;})).filter(Boolean);
+  if (!harBrond || dia >= brondDia) {
+    // Ingen brønd: skaler relativt til kendte diametre inden for BORING_MIN..BORING_MAX
+    var arr2 = (combinedDiasArr || []).filter(Boolean);
+    if (arr2.length > 1) {
+      var minB2 = Math.min.apply(null, arr2);
+      var maxB2 = Math.max.apply(null, arr2);
+      if (maxB2 > minB2) {
+        var frac2 = (dia - minB2) / (maxB2 - minB2);
+        return Math.round(BORING_MIN + frac2 * (BORING_MAX - BORING_MIN));
+      }
+    }
+    return BORING_MAX; // Enkelt diameter: vis med max boring-bredde
+  }
+  var arr = (combinedDiasArr || []).filter(Boolean);
   var minB = arr.length > 0 ? Math.min.apply(null, arr) : dia;
   var maxB = arr.length > 0 ? Math.max.apply(null, arr) : dia;
   if (maxB <= minB) return Math.round((BORING_MIN + BORING_MAX) / 2);
@@ -1414,7 +1429,20 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
   const BORING_MAX = Math.round(MAXW * 0.70);
   const BORING_MIN = Math.round(MAXW * 0.35);
   // Brug den globale beregnBreddePx funktion med lokale parametre
-  const breddePx = (dia) => beregnBreddePx(dia, harBrond, brondDia, forerSections, filterSections, MAXW, BORING_MIN, BORING_MAX);
+  // Byg diameter-liste: Jupiter-sektioner + manuelle lag-diametre
+  const lagDias = lag.reduce(function(acc, l) {
+    if (l.subLag && l.subLag.length > 0) {
+      l.subLag.forEach(function(s) { if (s.dia > 0) acc.push(s.dia); });
+    } else if (parseFloat(l.diaMm) > 0) {
+      acc.push(parseFloat(l.diaMm));
+    }
+    return acc;
+  }, []);
+  const combinedDias = (forerSections || []).map(function(s){return s.dia;})
+    .concat((filterSections || []).map(function(s){return s.dia;}))
+    .concat(lagDias)
+    .filter(Boolean);
+  const breddePx = (dia) => beregnBreddePx(dia, harBrond, brondDia, combinedDias, MAXW, BORING_MIN, BORING_MAX);
 
   return (
     <div style={{ background: C.white, border: "1px solid " + C.blue4,
