@@ -323,7 +323,8 @@ const _jupiterHandler = async (req, res) => {
     };
 
     // Scrape litologi table
-    const lithoRows = scrapeTable(h, "litologi");
+    // Jupiter bruger overskriften "Geologi" (ikke "Litologi") for geologi-tabellen
+    const lithoRows = scrapeTable(h, "Geologi");
     // Jupiter Geologi-tabel kolonner:
     // Top*(0) | Bund*(1) | Top**(2) | Bund**(3) | DGU-symbol(4) | Beskrivelse(5)
     lithoFromHtml = lithoRows
@@ -349,7 +350,7 @@ const _jupiterHandler = async (req, res) => {
   if (litho.length === 0) {
     try {
       const cUrl = `https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=${borid}`;
-      const cr = await fetch(cUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(2000) });
+      const cr = await fetch(cUrl, { headers: wfsHdrs, signal: AbortSignal.timeout(5000) });
       const ct = await cr.text();
       const features = allFeatures(ct);
       for (const f of features) {
