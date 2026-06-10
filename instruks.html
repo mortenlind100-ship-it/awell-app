@@ -544,7 +544,8 @@ function beregnLag(lag, bundpejling, primærBoring) {
       if (restKg <= 0.001) break;
       const zoneDia = diaVedDybde((fraDybde + bpTop) / 2 + 0.01,
                         forerSections, filterSections, brondDybde, brondDia)
-                    || startDia;
+                    || startDia
+                    || parseFloat(l.diaMm) || 0;
       const r = zoneDia / 2 / 1000;
       const lpm = Math.PI * r * r * 1000;
       // Volumen tilgængeligt i dette interval (fra fraDybde ned til bpTop)
@@ -561,7 +562,7 @@ function beregnLag(lag, bundpejling, primærBoring) {
     // Hvis materiale stadig er tilbage (over alle breakpoints), udstræk til 0
     if (restKg > 0.001 && fraDybde > 0) {
       const zoneDia = diaVedDybde(fraDybde / 2, forerSections, filterSections,
-                        brondDybde, brondDia) || startDia;
+                        brondDybde, brondDia) || startDia || parseFloat(l.diaMm) || 0;
       const r = zoneDia / 2 / 1000;
       const lpm = Math.PI * r * r * 1000;
       const hRest = restKg / (lpm * mat.kgPerL);
@@ -1054,9 +1055,58 @@ function BoringKort({ b, i, onChange, onFjern }) {
 }
 
 // ─── Lag-række ────────────────────────────────────────────────────────────────
-function LagRaekke({ lag, i, onChange, onFjern, calc }) {
+function beregnKgFraSektion(diaMm, laengdeM, materialId) {
+  const mat = MATERIALER.find(m => m.id === materialId);
+  if (!mat || !diaMm || !laengdeM || diaMm <= 0 || laengdeM <= 0) return "";
+  const r = diaMm / 2 / 1000;
+  const liter = Math.PI * r * r * laengdeM * 1000;
+  return Math.round(liter * mat.kgPerL).toString();
+}
+
+function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
   const upd = (k, v) => onChange({ ...lag, [k]: v });
   const mat = MATERIALER.find(m => m.id === lag.material);
+
+  // Byg sektions-options fra primær borings forerør + filter
+  const forerSek = (primær?.forerSections || []).map((s, idx) => ({
+    id: "forer_" + idx,
+    label: "Forerør  " + s.top + "–" + s.bund + " m  ·  Ø" + s.dia + " mm  ·  " + s.materiale,
+    dia: s.dia, laengde: s.bund - s.top,
+  }));
+  const filterSek = (primær?.filterSections || []).map((s, idx) => ({
+    id: "filter_" + idx,
+    label: "Filter  " + s.fra + "–" + s.til + " m  ·  Ø" + s.dia + " mm  ·  " + s.materiale,
+    dia: s.dia, laengde: s.til - s.fra,
+  }));
+  const brondSek = (primær?.type === "boring_med_brønd" || primær?.type === "brønd")
+    && primær?.brondDia && primær?.brondDybde
+    ? [{ id: "brond_0", label: "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm",
+        dia: parseFloat(primær.brondDia), laengde: parseFloat(primær.brondDybde) }]
+    : [];
+  const alleSektioner = [...brondSek, ...forerSek, ...filterSek];
+
+  function valgSektion(sektionId, materialId) {
+    if (!sektionId) {
+      onChange({ ...lag, sektion: "", kg: "" });
+      return;
+    }
+    const sek = alleSektioner.find(s => s.id === sektionId);
+    if (!sek) return;
+    const kg = beregnKgFraSektion(sek.dia, sek.laengde, materialId || lag.material);
+    onChange({ ...lag, sektion: sektionId, kg });
+  }
+
+  function valgMateriale(materialId) {
+    // Genberegn kg hvis en sektion er valgt
+    if (lag.sektion) {
+      const sek = alleSektioner.find(s => s.id === lag.sektion);
+      const kg = sek ? beregnKgFraSektion(sek.dia, sek.laengde, materialId) : lag.kg;
+      onChange({ ...lag, material: materialId, kg });
+    } else {
+      upd("material", materialId);
+    }
+  }
+
   return (
     <div style={{ background: C.white, border: "1px solid " + C.blue4,
       borderRadius: 8, padding: 14, marginBottom: 10,
@@ -1071,12 +1121,31 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
           style={{ background: "none", border: "none", cursor: "pointer",
             color: C.red, fontSize: 18, lineHeight: 1 }}>✕</button>}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "0 12px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr 1fr", gap: "0 12px" }}>
         <div>
           <label style={lbl}>Materiale</label>
-          <select style={inp} value={lag.material} onChange={e => upd("material", e.target.value)}>
+          <select style={inp} value={lag.material} onChange={e => valgMateriale(e.target.value)}>
             {MATERIALER.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
+        </div>
+        <div>
+          <label style={lbl}>Sektion</label>
+          <select style={inp} value={lag.sektion || ""} onChange={e => valgSektion(e.target.value)}>
+            <option value="">– Manuel mængde –</option>
+            {alleSektioner.length === 0
+              ? <option disabled>Hent Jupiter-data på boring</option>
+              : alleSektioner.map(s => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))
+            }
+          </select>
+          {lag.sektion && alleSektioner.find(s => s.id === lag.sektion) && (() => {
+            const sek = alleSektioner.find(s => s.id === lag.sektion);
+            const vol = Math.PI * Math.pow(sek.dia/2/1000, 2) * sek.laengde * 1000;
+            return <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
+              {sek.laengde.toFixed(2)} m · {vol.toFixed(1)} L
+            </div>;
+          })()}
         </div>
         <div>
           <label style={lbl}>Mængde (kg)</label>
@@ -1086,10 +1155,23 @@ function LagRaekke({ lag, i, onChange, onFjern, calc }) {
         </div>
         <div>
           <label style={lbl}>Ø (mm)</label>
-          <input style={inp} type="number" step="1"
-            value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)}
-            placeholder="Hentes fra boring" />
-          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>Bruges hvis ingen boring-data</div>
+          {calc?.diaStr
+            ? <div style={{ ...inp, background: C.blue3, fontWeight: 600,
+                color: C.blue, fontSize: 12, display: "flex", alignItems: "center",
+                minHeight: 36, cursor: "default" }}>
+                {calc.diaStr}
+              </div>
+            : <input style={inp} type="number" step="1"
+                value={lag.diaMm} onChange={e => upd("diaMm", e.target.value)}
+                placeholder="f.eks. 195" />
+          }
+          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
+            {calc?.diaStr
+              ? "Beregnet fra boring"
+              : !lag.diaMm
+                ? <span style={{ color: "#e67e22" }}>⚠ Angiv Ø for at tegne profil</span>
+                : "Manuel diameter"}
+          </div>
         </div>
       </div>
       {calc?.fraDybde != null && (
@@ -1174,75 +1256,120 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
         color: C.blue, fontSize: 13, marginBottom: 12 }}>
         📊 Sløjfningsprofil
       </div>}
-      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
 
-        {/* Profil-søjle med varierende bredde */}
-        <div style={{ position: "relative", height: H, width: MAXW + 40,
-          flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {/* Dybde-labels til venstre – udenfor SVG-containeren */}
+        <div style={{ position: "relative", width: 30, height: H, flexShrink: 0 }}>
+          {[0, 0.25, 0.5, 0.75, 1].map(frac => (
+            <div key={frac} style={{ position: "absolute",
+              top: frac * H - 5, right: 2,
+              fontSize: 9, color: C.text2, textAlign: "right", lineHeight: 1 }}>
+              {(frac * maks).toFixed(1)}
+            </div>
+          ))}
+        </div>
 
-          {/* Terræn-linje */}
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0,
-            height: 3, background: C.text, zIndex: 10 }} />
+        {/* Profil-søjle */}
+        <div style={{ position: "relative", height: H, width: MAXW + 20,
+          flexShrink: 0 }}>
 
-          {/* Tegn diameter-zoner som kontur */}
-          <svg width={MAXW + 40} height={H} style={{ position: "absolute", top: 0, left: 0 }}>
-            {diaZoner.length === 0 && (
-              <rect x={10} y={0} width={MAXW} height={H}
-                fill={C.blue3} stroke={C.blue4} strokeWidth={1} />
-            )}
-            {diaZoner.map((z, i) => {
-              const y1 = z.fra / maks * H;
-              const y2 = Math.min(z.til / maks * H, H);
-              const w  = breddePx(z.dia);
-              const x  = Math.round((MAXW + 40 - w) / 2);
-              return (
-                <rect key={i} x={x} y={y1} width={w} height={y2 - y1}
-                  fill={z.erBrond ? "#dceeff" : C.blue3}
-                  stroke={z.erBrond ? "#2980b9" : C.blue4}
-                  strokeWidth={z.erBrond ? 2 : 1}
-                  strokeDasharray={z.erBrond ? "none" : "none"} />
-              );
-            })}
-            {/* Brønd-boring overgang: vandret linje */}
-            {harBrond && (
-              <line
-                x1={0} y1={brondDybde / maks * H}
-                x2={MAXW + 40} y2={brondDybde / maks * H}
-                stroke="#2980b9" strokeWidth={2} strokeDasharray="5,3" />
-            )}
-            {/* Diameter-skift linjer */}
-            {diaZoner.slice(0, -1).map((z, i) => {
-              const y = z.til / maks * H;
-              const w1 = breddePx(z.dia);
-              const w2 = breddePx(diaZoner[i+1]?.dia);
-              const x1 = Math.round((MAXW + 40 - w1) / 2);
-              const x2 = Math.round((MAXW + 40 - w2) / 2);
-              return (
-                <g key={"line"+i}>
-                  <line x1={x1} y1={y} x2={x2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
-                  <line x1={x1+w1} y1={y} x2={x2+w2} y2={y} stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
-                  <text x={MAXW+4} y={y+4} fontSize={9} fill={C.blue}>Ø{diaZoner[i+1]?.dia}</text>
-                </g>
-              );
-            })}
-          </svg>
+          {/* Bygger diaZoner fra subLag hvis ingen Jupiter-sektioner */}
+          {(() => {
+            // Udvid diaZoner med lag-diametre når ingen sections tilgængelige
+            const allZoner = diaZoner.length > 0 ? diaZoner : (() => {
+              const zoner = [];
+              lag.forEach(l => {
+                if (l.fraDybde == null) return;
+                const subs = l.subLag && l.subLag.length > 0
+                  ? l.subLag
+                  : [{ fra: l.fraDybde, til: l.tilDybde, dia: parseFloat(l.diaMm) || maksDia }];
+                subs.forEach(s => {
+                  if (s.dia > 0) zoner.push({ fra: s.fra, til: s.til, dia: s.dia });
+                });
+              });
+              // Merge overlappende zoner med samme diameter
+              zoner.sort((a, b) => a.fra - b.fra);
+              const merged = [];
+              zoner.forEach(z => {
+                const last = merged[merged.length - 1];
+                if (last && last.dia === z.dia && z.fra <= last.til) {
+                  last.til = Math.max(last.til, z.til);
+                } else {
+                  merged.push({ ...z });
+                }
+              });
+              return merged;
+            })();
 
-          {/* Lag-farver oven på profil-konturen */}
+            return (
+              <svg width={MAXW + 20} height={H}
+                style={{ position: "absolute", top: 0, left: 0 }}>
+                {/* Baggrund / kontur-zoner */}
+                {allZoner.length === 0 && (
+                  <rect x={0} y={0} width={MAXW} height={H}
+                    fill={C.blue3} stroke={C.blue4} strokeWidth={1} />
+                )}
+                {allZoner.map((z, i) => {
+                  const y1 = z.fra / maks * H;
+                  const y2 = Math.min(z.til / maks * H, H);
+                  const w  = breddePx(z.dia);
+                  const x  = Math.round((MAXW - w) / 2);
+                  return (
+                    <rect key={i} x={x} y={y1} width={w} height={Math.max(y2 - y1, 1)}
+                      fill={z.erBrond ? "#dceeff" : C.blue3}
+                      stroke={z.erBrond ? "#2980b9" : C.blue4}
+                      strokeWidth={z.erBrond ? 2 : 1} />
+                  );
+                })}
+                {/* Diameter-skift linjer */}
+                {allZoner.slice(0, -1).map((z, i) => {
+                  const y = z.til / maks * H;
+                  const w1 = breddePx(z.dia);
+                  const w2 = breddePx(allZoner[i+1]?.dia);
+                  const x1 = Math.round((MAXW - w1) / 2);
+                  const x2 = Math.round((MAXW - w2) / 2);
+                  return (
+                    <g key={"dl"+i}>
+                      <line x1={x1} y1={y} x2={x2} y2={y}
+                        stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
+                      <line x1={x1+w1} y1={y} x2={x2+w2} y2={y}
+                        stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
+                      <text x={MAXW+2} y={y+4} fontSize={8} fill={C.blue}>
+                        Ø{allZoner[i+1]?.dia}
+                      </text>
+                    </g>
+                  );
+                })}
+                {/* Brønd-boring overgang */}
+                {harBrond && (
+                  <line x1={0} y1={brondDybde / maks * H}
+                    x2={MAXW + 20} y2={brondDybde / maks * H}
+                    stroke="#2980b9" strokeWidth={2} strokeDasharray="5,3" />
+                )}
+                {/* Terræn-linje */}
+                <line x1={0} y1={0} x2={MAXW + 20} y2={0}
+                  stroke={C.text} strokeWidth={2} />
+              </svg>
+            );
+          })()}
+
+          {/* Lag-farver – absolut positionerede over SVG */}
           {lag.map((l, i) => {
             if (l.fraDybde == null) return null;
             const mat = MATERIALER.find(m => m.id === l.material);
-            // Brug subLag til at tegne korrekt bredde pr. sub-interval
-            const subs = l.subLag && l.subLag.length > 0 ? l.subLag : [{ fra: l.fraDybde, til: l.tilDybde, dia: parseFloat(l.diaMm) || maksDia }];
+            const subs = l.subLag && l.subLag.length > 0
+              ? l.subLag
+              : [{ fra: l.fraDybde, til: l.tilDybde, dia: parseFloat(l.diaMm) || maksDia }];
             return subs.map((s, si) => {
               const y  = s.fra / maks * H;
               const h2 = Math.max((s.til - s.fra) / maks * H, 1.5);
-              const w  = breddePx(s.dia) - 2;
-              const x  = Math.round((MAXW + 40 - w) / 2);
+              const w  = Math.max(2, breddePx(s.dia) - 2);
+              const x  = Math.round((MAXW - w) / 2);
               return (
                 <div key={i + "-" + si} style={{
                   position: "absolute",
-                  top: y + "px", height: Math.max(h2, 2) + "px",
-                  left: x + "px", width: w + "px",
+                  top: y, height: Math.max(h2, 2),
+                  left: x, width: w,
                   background: (mat?.farve || "#ccc") + "cc",
                   borderBottom: si < subs.length-1 ? "none" : "1px solid rgba(0,0,0,0.15)",
                   zIndex: 5,
@@ -1250,14 +1377,6 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
               );
             });
           })}
-
-          {/* Dybde-labels */}
-          {[0, 0.25, 0.5, 0.75, 1].map(frac => (
-            <div key={frac} style={{ position: "absolute", left: 0, top: frac * H - 6,
-              fontSize: 9, color: C.text2, width: 24, textAlign: "right" }}>
-              {(frac * maks).toFixed(1)}
-            </div>
-          ))}
         </div>
 
         {/* Legende */}
@@ -1582,6 +1701,7 @@ function App() {
           )}
           {beregnetLag.map((l, i) => (
             <LagRaekke key={l.id} lag={l} i={i} calc={beregnetLag[i]}
+              primær={primær}
               onChange={upd => setLag(prev => prev.map((x, j) => j === i ? upd : x))}
               onFjern={() => setLag(prev => prev.filter((_, j) => j !== i))} />
           ))}
