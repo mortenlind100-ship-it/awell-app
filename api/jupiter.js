@@ -322,20 +322,46 @@ const _jupiterHandler = async (req, res) => {
       rovandstand: senestePejling ? senestePejling.pejling : null,
     };
 
-    // Scrape litologi table
-    // Jupiter bruger overskriften "Geologi" (ikke "Litologi") for geologi-tabellen
-    const lithoRows = scrapeTable(h, "Geologi");
-    // Jupiter Geologi-tabel kolonner:
-    // Top*(0) | Bund*(1) | Top**(2) | Bund**(3) | DGU-symbol(4) | Beskrivelse(5)
-    lithoFromHtml = lithoRows
-      .filter(r => r.length >= 2 && !isNaN(parseFloat((r[0]||"").replace(",","."))))
-      .map(r => ({
-        fraM:       (r[0] || "").replace(",", "."),
-        tilM:       (r[1] || "").replace(",", "."),
-        symbol:     r[4] || r[2] || null,
-        beskrivelse: r[5] || r[3] || r[2] || null,
-        tekst:      r[5] || r[4] || r[2] || null,
-      }));
+    // Geologi-sektionen i Jupiter indeholder undersektioner: Indtag, Litologi m.fl.
+    // Vi skal specifikt hente "Litologi"-undersektionen som har:
+    //   Top*(0) | Bund*(1) | Top**(2) | Bund**(3) | DGU-symbol(4) | Beskrivelse(5)
+    // Søg først i "Litologi"-subsektionen, derefter i "Geologi"-sektionen som fallback
+    const lithoIdx = h.indexOf("Litologi");
+    const geologiIdx = h.indexOf("Geologi");
+    const lithoScope = lithoIdx >= 0
+      ? h.slice(lithoIdx, lithoIdx + 8000)
+      : (geologiIdx >= 0 ? h.slice(geologiIdx, geologiIdx + 8000) : h);
+
+    const lithoRows = scrapeTable(lithoScope, "Top*");  // Find tabel med "Top*"-kolonneoverskrift
+
+    // Brug header-bevidst parsing: find kolonne-indeks ved navn
+    if (lithoRows.length >= 2) {
+      const headers = lithoRows[0].map(h2 => h2.toLowerCase().replace(/[*() ]/g, ""));
+      const iTop  = headers.findIndex(h2 => h2 === "top" || h2 === "top*" || h2.startsWith("top"));
+      const iBund = headers.findIndex(h2 => h2 === "bund" || h2 === "bund*" || h2.startsWith("bund"));
+      // DGU-symbol er typisk kolonne 4, Beskrivelse kolonne 5
+      const iSym  = headers.findIndex(h2 => h2.includes("dgu") || h2.includes("symbol"));
+      const iBesk = headers.findIndex(h2 => h2.includes("beskrivelse") || h2.includes("tekst"));
+
+      const topIdx  = iTop  >= 0 ? iTop  : 0;
+      const bundIdx = iBund >= 0 ? iBund : 1;
+      const symIdx  = iSym  >= 0 ? iSym  : 4;
+      const beskIdx = iBesk >= 0 ? iBesk : 5;
+
+      lithoFromHtml = lithoRows.slice(1)
+        .filter(r => {
+          const fra = parseFloat((r[topIdx] || "").replace(",", "."));
+          return !isNaN(fra) && fra >= 0; // kun rækker med gyldig positiv dybde
+        })
+        .map(r => ({
+          fraM:        (r[topIdx]  || "").replace(",", "."),
+          tilM:        (r[bundIdx] || "").replace(",", "."),
+          symbol:      (r[symIdx]  || "").trim() || null,
+          beskrivelse: (r[beskIdx] || r[symIdx] || "").trim() || null,
+          tekst:       (r[beskIdx] || r[symIdx] || "").trim() || null,
+        }))
+        .filter(l => l.fraM && l.beskrivelse); // kun rækker med dybde og beskrivelse
+    }
 
     // Scrape vandstand/pejling table
     const vandRows = scrapeTable(h, "vandstand");
