@@ -613,6 +613,7 @@ async function hentJupiter(dguNr) {
     boreholeUrl:     b.boreholeUrl  || "",
     pdfUrl:          b.pdfUrl       || "",
     litho:           json.litho     || [],
+    gruskastning:    json.boring?.gruskastning || [],
   };
 }
 
@@ -1060,7 +1061,9 @@ function beregnKgFraSektion(diaMm, laengdeM, materialId) {
   if (!mat || !diaMm || !laengdeM || diaMm <= 0 || laengdeM <= 0) return "";
   const r = diaMm / 2 / 1000;
   const liter = Math.PI * r * r * laengdeM * 1000;
-  return Math.round(liter * mat.kgPerL).toString();
+  // Bevar præcis float internt; vis med 1 decimal i feltet
+  const præcis = liter * mat.kgPerL;
+  return præcis.toFixed(1);
 }
 
 function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
@@ -1149,7 +1152,7 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
         </div>
         <div>
           <label style={lbl}>Mængde (kg)</label>
-          <input style={inp} type="number" step="10"
+          <input style={inp} type="number" step="0.1"
             value={lag.kg} onChange={e => upd("kg", e.target.value)} placeholder="kg" />
           {mat && <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>{mat.kgPerL} kg/L</div>}
         </div>
@@ -1189,7 +1192,7 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
 }
 
 // ─── Profil-visualisering ─────────────────────────────────────────────────────
-function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, brondDia, type, litho, inline }) {
+function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, brondDia, type, litho, gruskastning, inline }) {
   const maks = parseFloat(bundpejling);
   if (!bundpejling || isNaN(maks) || maks <= 0) return null;
   if (!lag.some(l => l.fraDybde != null)) return null;
@@ -1256,7 +1259,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
         color: C.blue, fontSize: 13, marginBottom: 12 }}>
         📊 Sløjfningsprofil
       </div>}
-      <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
 
         {/* Dybde-labels til venstre – udenfor SVG-containeren */}
         <div style={{ position: "relative", width: 30, height: H, flexShrink: 0 }}>
@@ -1346,6 +1349,34 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                     x2={MAXW + 20} y2={brondDybde / maks * H}
                     stroke="#2980b9" strokeWidth={2} strokeDasharray="5,3" />
                 )}
+                {/* Gruskastning – ydre buffer uden på sløjfningsprofil */}
+                {(gruskastning || []).map((g, gi) => {
+                  const gy1 = (g.top + brondDybde) / maks * H;
+                  const gy2 = Math.min((g.bund + brondDybde) / maks * H, H);
+                  const profW = breddePx(g.dia || maksDia);
+                  const innerW = breddePx(
+                    (forerSections||[]).find(f => g.top >= f.top && g.bund <= f.bund)?.dia
+                    || maksDia * 0.7
+                  );
+                  const outerX = Math.round((MAXW - profW) / 2);
+                  const innerX = Math.round((MAXW - innerW) / 2);
+                  return (
+                    <g key={"grus"+gi}>
+                      {/* Venstre buffer */}
+                      <rect x={outerX} y={gy1} width={innerX - outerX} height={gy2 - gy1}
+                        fill="#F4D03F55" stroke="#F4D03F" strokeWidth={1} />
+                      {/* Højre buffer */}
+                      <rect x={innerX + innerW} y={gy1}
+                        width={outerX + profW - innerX - innerW} height={gy2 - gy1}
+                        fill="#F4D03F55" stroke="#F4D03F" strokeWidth={1} />
+                      {/* Label */}
+                      <text x={outerX + 1} y={gy1 + (gy2-gy1)/2 + 3}
+                        fontSize={7} fill="#8d6e00" transform={`rotate(-90,${outerX+4},${gy1+(gy2-gy1)/2})`}>
+                        Grus
+                      </text>
+                    </g>
+                  );
+                })}
                 {/* Terræn-linje */}
                 <line x1={0} y1={0} x2={MAXW + 20} y2={0}
                   stroke={C.text} strokeWidth={2} />
@@ -1412,20 +1443,16 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
               )}
             </div>}
           </div>
-        </div>
-
-        {/* ── Geologi synkroniseret med sløjfningsprofil ──────────── */}
+          {/* ── Geologi synkroniseret med sløjfningsprofil ──────────── */}
         {litho && litho.length > 0 && bundpejling && (
-          <div style={{ marginTop: 16, borderTop: "1px solid " + C.blue4, paddingTop: 12 }}>
+          <div style={{ borderLeft: "1px solid " + C.blue4, paddingLeft: 8 }}>
             <div style={{ fontFamily: "'Montserrat', sans-serif", fontWeight: 700,
-              fontSize: 12, color: C.blue, marginBottom: 8 }}>
+              fontSize: 11, color: C.blue, marginBottom: 4 }}>
               🪨 Geologi
             </div>
             {(() => {
               // Synkroniser med sløjfningsprofil: brug samme H og maks
-              const geoMaks = Math.max(maks,
-                ...litho.map(l => parseFloat(l.tilM) || 0)
-              );
+              const geoMaks = maks; // brug præcis samme skala som sløjfningsprofil
               const geoH = H; // samme højde som profil-SVG
 
               const geoFarve = (sym) => {
@@ -1442,19 +1469,9 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
 
               return (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
-                  {/* Dybde-labels synkroniseret */}
-                  <div style={{ width: 28, flexShrink: 0, position: "relative",
-                    height: geoH, fontSize: 8, color: C.text2 }}>
-                    {[0, 0.25, 0.5, 0.75, 1].map(f => (
-                      <div key={f} style={{ position: "absolute",
-                        top: f * geoH - 4, right: 3, lineHeight: 1 }}>
-                        {(f * geoMaks).toFixed(1)}
-                      </div>
-                    ))}
-                  </div>
-                  {/* Geologi-blokke absolutt positionerede */}
-                  <div style={{ flex: 1, position: "relative", height: geoH,
-                    border: "1px solid " + C.blue4, overflow: "hidden" }}>
+                  {/* Geologi-blokke absolut positionerede – ingen ekstra dybde-kolonne */}
+                  <div style={{ width: 120, flexShrink: 0, position: "relative",
+                    height: geoH, border: "1px solid " + C.blue4, overflow: "hidden" }}>
                     {litho.map((l, i) => {
                       const fra = parseFloat(l.fraM) || 0;
                       const til = parseFloat(l.tilM) || fra + 1;
@@ -1510,7 +1527,7 @@ function nyBoring() {
     totaldybde: "", rovandspejl: "",
     forerDia: "", forerBund: "", forerSections: [],
     filterFra: "", filterTil: "", filterDia: "", filterSections: [],
-    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [],
+    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [], gruskastning: [],
   };
 }
 
@@ -1718,7 +1735,8 @@ function App() {
             brondDybde={brondDybde}
             brondDia={parseFloat(primær.brondDia) || 0}
             type={primær.type}
-            litho={primær.litho || []} />
+            litho={primær.litho || []}
+            gruskastning={primær.gruskastning || []} />
           <div style={{ marginTop: 16 }}>
             <button style={btn()} onClick={() => setFane("grej")}>
               Næste: Grej →
