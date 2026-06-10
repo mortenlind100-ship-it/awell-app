@@ -256,6 +256,26 @@ const _jupiterHandler = async (req, res) => {
       filterSections = filterSectionsUniq;
     }
 
+    // ── Gruskastning ─────────────────────────────────────────────────────────
+    // Ydre pakningszone uden på forerøret (sandet filtersand eller grus).
+    // Kolonner: Top*(0) | Bund*(1) | Materiale(2) | Diameter(3)
+    const grusRows = scrapeTable(hScope, "Gruskastning");
+    let gruskastningSection = [];
+    if (grusRows.length >= 2) {
+      const gh = grusRows[0].map(h2 => h2.toLowerCase().replace(/[()* ]/g, ""));
+      const gi = (name) => { const i = gh.findIndex(h2 => h2.includes(name)); return i >= 0 ? i : -1; };
+      const gtop  = gi("top"),  gbund = gi("bund"),
+            gdia  = gi("diam"), gmat  = gi("mater");
+      gruskastningSection = grusRows.slice(1)
+        .map(r => ({
+          top:       parseFloat((r[gtop  >= 0 ? gtop  : 0] || "").replace(",", ".")) || 0,
+          bund:      parseFloat((r[gbund >= 0 ? gbund : 1] || "").replace(",", ".")) || 0,
+          dia:       parseFloat((r[gdia  >= 0 ? r[gdia]  : ""] || "").toString().replace(",", ".")) || 0,
+          materiale: (r[gmat  >= 0 ? gmat  : 2] || "").trim(),
+        }))
+        .filter(s => s.bund > 0 || s.top > 0);
+    }
+
     // ── Vandstand: Seneste rovandspejling ─────────────────────────────────────
     // Jupiter borerapporten har en sektion "Seneste pejling" med én tabel-række:
     //   Dato | Pejling (m u.t.) | Kote (m DNN) | Målernavn
@@ -317,6 +337,7 @@ const _jupiterHandler = async (req, res) => {
       filterTil:  filterSections.length > 0 ? String(filterSections[0].til) : null,
       filterSections,        // alle filtersektioner (inkl. dubletter)
       filterSectionsUniq,    // deduplikerede filtersektioner
+      gruskastningSection,   // ydre gruspakning
       // Vandstand: seneste pejling
       senestePejling,
       rovandstand: senestePejling ? senestePejling.pejling : null,
@@ -451,6 +472,7 @@ const _jupiterHandler = async (req, res) => {
       filterFra:       htmlData.filterFra,
       filterTil:       htmlData.filterTil,
       filterSections:  htmlData.filterSectionsUniq || htmlData.filterSections || [],
+      gruskastning:    htmlData.gruskastningSection || [],
       rovandstand:     htmlData.rovandstand,
       senestePejling:  htmlData.senestePejling,
       indvinding:  htmlData.indvinding,
