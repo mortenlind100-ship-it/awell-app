@@ -464,7 +464,7 @@ function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling,
     y = 15;
 
     doc.setFontSize(16); doc.setFont("helvetica","bold"); doc.setTextColor(...BLUE);
-    doc.text("APPENDIX 2: Støbningsjournal – Cementgrout", 10, y); y += 7;
+    doc.text("APPENDIX 2: Støbejournal – cementgrout", 10, y); y += 7;
     doc.setFontSize(9); doc.setFont("helvetica","normal"); doc.setTextColor(...GREY);
     doc.text("Udfyldes for hver blanding af cementgrout under sløjfning.", 10, y); y += 4;
     doc.text("DGU " + (boringer[0]?.dgu||"–") + "  ·  " + (projekt.adresse||"") + "  ·  " + (projekt.sagsnummer||""), 10, y);
@@ -496,8 +496,7 @@ function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling,
     const cementLag = beregnetLag.filter(l => l.material === "cementgrout" || l.material === "cement_stolpe");
     const totalCementKg = cementLag.reduce((s, l) => s + (parseFloat(l.kg)||0), 0);
     // Typical batch: 1 bag (25kg) per ~22L -> estimate rows
-    const antalBlandinger = Math.max(10, Math.ceil(totalCementKg / 25));
-    const rowsPerPage = 22;
+    const antalBlandinger = 10;
 
     doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
 
@@ -616,21 +615,27 @@ function beregnVolumen(diaMm, laengdeM) {
 
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
 function diaVedDybde(dybde, forerSections, filterSections, brondDybde, brondDia) {
-  // Brønd-zone: 0 til brondDybde m.u.t. – bredeste diameter
+  // Brønd-zone: 0 til brondDybde m.u.t.
+  // Forerøret kan gå op igennem brønden – dybder er altid fra terræn (m.u.t.)
+  // og justeres IKKE med brondDybde.
   if (brondDybde > 0 && brondDia > 0 && dybde <= brondDybde) {
-    return brondDia;
+    // Inden for brønd-zonen: returner brøndens diameter MEDMINDRE boringen
+    // har en sektion her (boring går op igennem brønden)
+    for (const fs of (filterSections || [])) {
+      if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
+    }
+    for (const fr of (forerSections || [])) {
+      if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
+    }
+    return brondDia;  // Ingen boring-sektion her – ren brønd-zone
   }
-  // Forerør og filter-dybder er angivet relativt til boring (ikke brønd+boring).
-  // Justér: boring-koordinater starter ved brondDybde m.u.t.
-  const boringDybde = dybde - (brondDybde || 0);
 
-  // Check filter (åben kalk / filter-zone)
+  // Nedenfor brønd (eller ingen brønd): brug boring-sektionernes dybder direkte
   for (const fs of (filterSections || [])) {
-    if (boringDybde >= fs.fra && boringDybde <= fs.til) return fs.dia;
+    if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
   }
-  // Forerør
   for (const fr of (forerSections || [])) {
-    if (boringDybde >= fr.top && boringDybde <= fr.bund) return fr.dia;
+    if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
   }
   // Fallback: under/over alle kendte sektioner
   const allSections = [
@@ -639,8 +644,7 @@ function diaVedDybde(dybde, forerSections, filterSections, brondDybde, brondDia)
   ];
   if (allSections.length > 0) {
     const deepest = allSections.reduce((a, b) => b.bund > a.bund ? b : a);
-    if (boringDybde > deepest.bund) return deepest.dia;
-    // Over øverste sektion (f.eks. mellem brønd og forerørets top): brug øverste forerør
+    if (dybde > deepest.bund) return deepest.dia;
     const allForer = (forerSections || []);
     if (allForer.length > 0) return allForer[0].dia;
   }
@@ -710,17 +714,15 @@ function beregnLag(lag, bundpejling, primærBoring) {
 
     // Find alle diameter-skift-punkter fra dybde og opad mod 0
     // Saml breakpoints: brønd-grænse + forerør-skift + filter-skift
-    const allBreaks = new Set();
-    if (brondDybde > 0) allBreaks.add(brondDybde);
+    // Breakpoints: altid terræn-relative m.u.t. – ingen brondDybde-offset
+    const allBreaks = new Set([0]);
+    if (brondDybde > 0) allBreaks.add(brondDybde); // brønd-/boring-overgang
     (forerSections || []).forEach(fr => {
-      const top = fr.top + brondDybde, bund = fr.bund + brondDybde;
-      allBreaks.add(top); allBreaks.add(bund);
+      allBreaks.add(fr.top); allBreaks.add(fr.bund);
     });
     (filterSections || []).forEach(fs => {
-      const fra = fs.fra + brondDybde, til = fs.til + brondDybde;
-      allBreaks.add(fra); allBreaks.add(til);
+      allBreaks.add(fs.fra); allBreaks.add(fs.til);
     });
-    allBreaks.add(0);
     // Sortér faldende (dybeste til øverste)
     const breaksSorted = Array.from(allBreaks).filter(b => b <= dybde).sort((a, b) => b - a);
 
@@ -1109,9 +1111,9 @@ function BoringKort({ b, i, onChange, onFjern }) {
       <div style={{ marginBottom: 12 }}>
         <label style={lbl}>Type</label>
         <select style={inp} value={b.type} onChange={e => upd("type", e.target.value)}>
-          <option value="boring">Boring (forerør + filter)</option>
-          <option value="brønd">Brønd / muret brønd</option>
-          <option value="boring_med_brønd">Boring med brønd ovenpå</option>
+          <option value="boring">Boring uden brønd</option>
+          <option value="brønd">Brønd uden boring</option>
+          <option value="boring_med_brønd">Boring i brønd</option>
         </select>
       </div>
 
@@ -1410,10 +1412,10 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
     diaZoner.push({ fra: 0, til: brondDybde, dia: brondDia, erBrond: true });
   }
   (forerSections || []).forEach(function(fr) {
-    diaZoner.push({ fra: fr.top + brondDybde, til: fr.bund + brondDybde, dia: fr.dia });
+    diaZoner.push({ fra: fr.top, til: fr.bund, dia: fr.dia });
   });
   (filterSections || []).forEach(function(fs) {
-    diaZoner.push({ fra: fs.fra + brondDybde, til: fs.til + brondDybde, dia: fs.dia });
+    diaZoner.push({ fra: fs.fra, til: fs.til, dia: fs.dia });
   });
   diaZoner.sort(function(a, b) { return a.fra - b.fra; });
 
@@ -1521,8 +1523,8 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                 )}
                 {/* Gruskastning – ydre buffer uden på sløjfningsprofil */}
                 {(gruskastning || []).map((g, gi) => {
-                  const gy1 = (g.top + brondDybde) / maks * H;
-                  const gy2 = Math.min((g.bund + brondDybde) / maks * H, H);
+                  const gy1 = g.top / maks * H;
+                  const gy2 = Math.min(g.bund / maks * H, H);
                   const profW = breddePx(g.dia || maksDia);
                   const innerW = breddePx(
                     (forerSections||[]).find(f => g.top >= f.top && g.bund <= f.bund)?.dia
@@ -1716,13 +1718,39 @@ function App() {
   });
 
   const [boringer, setBoringer] = useState([nyBoring()]);
-  const [lag, setLag] = useState([{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }]);
+  // lagPerBoring: { [boringId]: lagArray }
+  const [lagPerBoring, setLagPerBoring] = useState(() => ({ [boringer[0].id]: [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }] }));
+  const [aktivBoring, setAktivBoring] = useState(boringer[0].id);
   const [grej, setGrej] = useState([]);
   const [friGrej, setFriGrej] = useState("");
 
   const updP = (k, v) => setProjekt(p => ({ ...p, [k]: v }));
 
-  const primær = boringer[0];
+  // Hent eller initialiser lag-array for en boring
+  const getLag = (boringId) => lagPerBoring[boringId] || [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }];
+  const setLag = (boringId, updater) => setLagPerBoring(prev => {
+    const cur = prev[boringId] || [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }];
+    const next = typeof updater === "function" ? updater(cur) : updater;
+    return { ...prev, [boringId]: next };
+  });
+
+  // Sørg for at nye boringer får lag-arrays
+  React.useEffect(() => {
+    setLagPerBoring(prev => {
+      const next = { ...prev };
+      boringer.forEach(b => {
+        if (!next[b.id]) next[b.id] = [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }];
+      });
+      // Ryd boringer der ikke længere eksisterer
+      const ids = new Set(boringer.map(b => b.id));
+      Object.keys(next).forEach(k => { if (!ids.has(k)) delete next[k]; });
+      return next;
+    });
+    // Sæt aktiv boring til primær hvis den aktuelle er slettet
+    if (!boringer.find(b => b.id === aktivBoring)) setAktivBoring(boringer[0]?.id);
+  }, [boringer]);
+
+  const primær = boringer.find(b => b.id === aktivBoring) || boringer[0];
   // Bundpejling: for boring_med_brønd bruges boringsdybden (brønden er en del af profilen)
   const bundpejling = primær.bundpejling ||
     (primær.type === "brønd" ? primær.brondDybde : primær.totaldybde) || null;
@@ -1730,10 +1758,16 @@ function App() {
     ? (parseFloat(primær.brondDybde) || 0) : 0;
   const forerSections  = primær.forerSections  || [];
   const filterSections = primær.filterSections || [];
+  const lag = getLag(primær.id);
   const beregnetLag = beregnLag(lag, bundpejling, primær);
 
   function download() {
-    const html = buildWordHtml(projekt, boringer, beregnetLag, grej, friGrej, bundpejling);
+    const allBeregnetWord = boringer.flatMap(b => {
+      const bLag = getLag(b.id);
+      const bBp = b.bundpejling || (b.type === "brønd" ? b.brondDybde : b.totaldybde) || null;
+      return beregnLag(bLag, bBp, b);
+    });
+    const html = buildWordHtml(projekt, boringer, allBeregnetWord, grej, friGrej, bundpejling);
     downloadWord(html, projekt.sagsnummer);
   }
 
@@ -1876,6 +1910,38 @@ function App() {
         {/* ── SLØJFNING ───────────────────────────────────────────────────── */}
         {fane === "sloejfning" && <>
           <Sekt n="3" title="Sløjfningssekvens og materialer" icon="🪣" />
+
+          {/* Under-faneblade – én per boring */}
+          {boringer.length > 1 && (
+            <div style={{ display: "flex", gap: 0, marginBottom: 16,
+              borderBottom: "2px solid " + C.blue4, overflowX: "auto" }}>
+              {boringer.map(b => (
+                <button key={b.id} onClick={() => setAktivBoring(b.id)}
+                  style={{ padding: "8px 16px", border: "none", background: "none",
+                    cursor: "pointer",
+                    fontFamily: "'Montserrat', sans-serif", fontSize: 12,
+                    fontWeight: aktivBoring === b.id ? 800 : 500,
+                    color: aktivBoring === b.id ? C.blue : C.text2,
+                    borderBottom: aktivBoring === b.id
+                      ? "3px solid " + C.blue : "3px solid transparent",
+                    marginBottom: -2, whiteSpace: "nowrap" }}>
+                  {b.dgu ? "DGU " + b.dgu : "Boring " + (boringer.indexOf(b) + 1)}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Vis DGU-nummer over sekvensen */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+            <span style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 700,
+              fontSize: 13, color: C.blue }}>
+              {primær.dgu ? "DGU " + primær.dgu : "Boring " + (boringer.indexOf(primær)+1)}
+            </span>
+            {bundpejling && <span style={{ fontSize: 12, color: C.text2 }}>
+              · Bundpejling {bundpejling} m.u.t.
+            </span>}
+          </div>
+
           <p style={{ fontSize: 13, color: C.text2, marginBottom: 10, lineHeight: 1.6 }}>
             Angiv materialer <strong>fra bunden og op</strong> (lag 1 = nederst).
             Dybder beregnes automatisk ud fra bundpejling og diameter.
@@ -1884,17 +1950,17 @@ function App() {
             <div style={{ background: "#fff8e1", border: "1px solid #ffe082",
               borderRadius: 8, padding: "10px 14px", fontSize: 13,
               color: "#8d6e00", marginBottom: 14 }}>
-              💡 Angiv bundpejling på den primære boring for automatisk dybdeberegning.
+              💡 Angiv bundpejling på boringen for automatisk dybdeberegning.
             </div>
           )}
           {beregnetLag.map((l, i) => (
             <LagRaekke key={l.id} lag={l} i={i} calc={beregnetLag[i]}
               primær={primær}
-              onChange={upd => setLag(prev => prev.map((x, j) => j === i ? upd : x))}
-              onFjern={() => setLag(prev => prev.filter((_, j) => j !== i))} />
+              onChange={upd => setLag(primær.id, prev => prev.map((x, j) => j === i ? upd : x))}
+              onFjern={() => setLag(primær.id, prev => prev.filter((_, j) => j !== i))} />
           ))}
           <button style={btn("#34495e", { marginBottom: 16 })}
-            onClick={() => setLag(prev => [
+            onClick={() => setLag(primær.id, prev => [
               { id: uid(), material: "stabilgrus", kg: "", diaMm: "" },
               ...prev
             ])}>
@@ -1963,9 +2029,14 @@ function App() {
           {(() => {
             const matLabel = id => (MATERIALER.find(m => m.id === id) || {}).label || id;
             const aggr = {};
-            beregnetLag.forEach(l => {
-              if (!l.kg || parseFloat(l.kg) <= 0) return;
-              aggr[l.material] = (aggr[l.material] || 0) + (parseFloat(l.kg) || 0);
+            // Aggreger fra ALLE boringer
+            boringer.forEach(b => {
+              const bLag = getLag(b.id);
+              const bBp = b.bundpejling || (b.type === "brønd" ? b.brondDybde : b.totaldybde) || null;
+              beregnLag(bLag, bBp, b).forEach(l => {
+                if (!l.kg || parseFloat(l.kg) <= 0) return;
+                aggr[l.material] = (aggr[l.material] || 0) + (parseFloat(l.kg) || 0);
+              });
             });
             const entries = Object.entries(aggr);
             if (entries.length === 0) return (
@@ -2068,7 +2139,14 @@ function App() {
               style={{ ...btn(), flex: 1, padding: 14, fontSize: 14 }}>
               📄 Word (.doc)
             </button>
-            <button onClick={() => downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling, primær)}
+            <button onClick={() => {
+                const allBeregnet = boringer.flatMap(b => {
+                  const bLag = getLag(b.id);
+                  const bBp = b.bundpejling || (b.type === "brønd" ? b.brondDybde : b.totaldybde) || null;
+                  return beregnLag(bLag, bBp, b);
+                });
+                downloadPdf(projekt, boringer, allBeregnet, grej, friGrej, bundpejling, primær);
+              }}
               style={{ ...btn("#E8500A"), flex: 1, padding: 14, fontSize: 14,
                 boxShadow: "0 3px 12px rgba(232,80,10,0.3)" }}>
               📑 PDF
