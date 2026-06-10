@@ -352,6 +352,190 @@ function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling,
     doc.text("Side " + i + " af " + pageCount, 185, 292);
   }
 
+  // ── APPENDIX 1: Feltjournal ──────────────────────────────────────────────────
+  doc.addPage();
+  y = 15;
+
+  doc.setFontSize(16); doc.setFont("helvetica","bold"); doc.setTextColor(...BLUE);
+  doc.text("APPENDIX 1: Feltjournal", 10, y); y += 7;
+  doc.setFontSize(9); doc.setFont("helvetica","normal"); doc.setTextColor(...GREY);
+  doc.text("Udfyldes af teknikeren på stedet under udførelse af sløjfningsarbejdet.", 10, y); y += 10;
+
+  // ── A. Daglige pejlinger ───────────────────────────────────────────────────
+  doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+  doc.text("A.  Daglige pejlinger (før start hver dag)", 10, y); y += 7;
+
+  // Tabel-header
+  const colD = [10, 42, 82, 122, 162]; // x-positions
+  const colW = [30, 38, 38, 38, 28];   // widths
+  const headers = ["Dato", "Bundpejling\n(m.u.t.)", "Rovandspejl\n(m.u.t.)", "Forerør Ø\n(mm)", "Bemærk."];
+  doc.setFillColor(...[220,232,244]);
+  doc.rect(10, y-4, W, 10, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...BLUE);
+  headers.forEach((h, i) => {
+    h.split("\n").forEach((line, li) => doc.text(line, colD[i]+1, y + li*4));
+  });
+  y += 10;
+
+  // 5 blank rows
+  doc.setFont("helvetica","normal"); doc.setTextColor(...DARK);
+  for (let ri = 0; ri < 5; ri++) {
+    doc.setFillColor(ri%2===0 ? 255 : 248, ri%2===0 ? 255 : 251, ri%2===0 ? 255 : 254);
+    doc.rect(10, y-4, W, 8, "F");
+    doc.setDrawColor(...[184,208,232]); doc.setLineWidth(0.2);
+    colD.forEach((x, i) => doc.rect(x, y-4, colW[i], 8));
+    y += 8;
+  }
+  y += 6;
+
+  // ── B. Faktiske sløjfningsmængder ─────────────────────────────────────────
+  doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+  doc.text("B.  Faktiske sløjfningsmængder og pejlinger", 10, y); y += 7;
+
+  // Header
+  const bCols = [10, 50, 90, 130, 160];
+  const bW    = [38, 38, 38, 28,  30];
+  const bHdrs = ["Materiale", "Planlagt (kg)", "Faktisk (kg)", "Bund (m.u.t.)", "Dato/tid"];
+  doc.setFillColor(...[220,232,244]);
+  doc.rect(10, y-4, W, 8, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(8); doc.setTextColor(...BLUE);
+  bHdrs.forEach((h, i) => doc.text(h, bCols[i]+1, y));
+  y += 8;
+
+  const matNavn3 = { bentonit_pellets:"Bentonit pellets", bentonit_grout:"Bentonit grout",
+    cementgrout:"Cementgrout", filtersand:"Filtersand", aertesten:"Ærtesten",
+    stabilgrus:"Stabilgrus", brogrus:"Brogrus", muld:"Muld", cement_stolpe:"Stolpebeton" };
+
+  const matFarver3 = { bentonit_pellets:[107,142,35], bentonit_grout:[139,115,85],
+    cementgrout:[169,169,169], filtersand:[232,200,74], aertesten:[210,180,140],
+    stabilgrus:[200,184,154], brogrus:[184,168,152], muld:[93,64,55], cement_stolpe:[128,128,128] };
+
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
+  beregnetLag.forEach((l, i) => {
+    checkY(9);
+    const farve = matFarver3[l.material] || [180,180,180];
+    doc.setFillColor(i%2===0 ? 255:248, i%2===0 ? 255:251, i%2===0 ? 255:254);
+    doc.rect(10, y-4, W, 8, "F");
+    // Materiale farve-stribe
+    doc.setFillColor(...farve);
+    doc.rect(10, y-4, 3, 8, "F");
+    doc.setDrawColor(...[184,208,232]); doc.setLineWidth(0.2);
+    bCols.forEach((x, ci) => doc.rect(x, y-4, bW[ci], 8));
+    doc.setTextColor(...DARK);
+    doc.text(matNavn3[l.material] || l.material, bCols[0]+5, y);
+    doc.setFont("helvetica","bold");
+    doc.text(l.kg ? l.kg + " kg" : "–", bCols[1]+1, y);
+    doc.setFont("helvetica","normal");
+    // Empty fields for actual values
+    y += 8;
+  });
+  y += 8;
+
+  // ── C. Bemærkninger ────────────────────────────────────────────────────────
+  checkY(30);
+  doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+  doc.text("C.  Bemærkninger og afvigelser", 10, y); y += 7;
+  doc.setFillColor(248,251,254);
+  doc.rect(10, y-4, W, 35, "F");
+  doc.setDrawColor(...[184,208,232]); doc.setLineWidth(0.3);
+  doc.rect(10, y-4, W, 35);
+  // Lined paper effect
+  for (let li = 0; li < 6; li++) {
+    doc.setDrawColor(220,232,244); doc.setLineWidth(0.1);
+    doc.line(12, y + li*5.5, 198, y + li*5.5);
+  }
+  y += 42;
+
+  // ── D. Underskrift ─────────────────────────────────────────────────────────
+  checkY(25);
+  doc.setFontSize(9); doc.setFont("helvetica","normal"); doc.setTextColor(...DARK);
+  doc.line(10, y+12, 90, y+12); doc.line(110, y+12, 200, y+12);
+  doc.text("Dato og tekniker-underskrift", 10, y+16);
+  doc.text("Kontrolleret af", 110, y+16);
+  y += 25;
+
+  // ── APPENDIX 2: Cementgrout støbningsjournal (kun hvis cementgrout bruges) ──
+  const harCement = beregnetLag.some(l =>
+    l.material === "cementgrout" || l.material === "cement_stolpe"
+  );
+
+  if (harCement) {
+    doc.addPage();
+    y = 15;
+
+    doc.setFontSize(16); doc.setFont("helvetica","bold"); doc.setTextColor(...BLUE);
+    doc.text("APPENDIX 2: Støbningsjournal – Cementgrout", 10, y); y += 7;
+    doc.setFontSize(9); doc.setFont("helvetica","normal"); doc.setTextColor(...GREY);
+    doc.text("Udfyldes for hver blanding af cementgrout under sløjfning.", 10, y); y += 4;
+    doc.text("DGU " + (boringer[0]?.dgu||"–") + "  ·  " + (projekt.adresse||"") + "  ·  " + (projekt.sagsnummer||""), 10, y);
+    y += 10;
+
+    // Cement tabel - kolonner fra billede:
+    // Dato | Bundpejling (m.u.t.) | Rovandspejl (m.u.t.) | Blanding nr. | Støbning: vol. af blanding (L) | Støbning: antal poser cement á 25 kg (stk)
+    const cCols  = [10,  32,  62,  92, 118, 152];
+    const cWidths = [21,  28,  28,  24,  33,  38];
+    const cHdrs  = [
+      ["Dato"],
+      ["Bundpejling", "(m.u.t.)"],
+      ["Rovandspejl", "(m.u.t.)"],
+      ["Blanding", "nr."],
+      ["Støbning:", "vol. (liter)"],
+      ["Støbning:", "poser á 25 kg"],
+    ];
+
+    // Header
+    doc.setFillColor(...[220,232,244]);
+    doc.rect(10, y-4, W, 13, "F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...BLUE);
+    cHdrs.forEach((lines, i) => {
+      lines.forEach((line, li) => doc.text(line, cCols[i]+1, y + li*5));
+    });
+    y += 13;
+
+    // Calculate number of rows needed based on cement volume
+    const cementLag = beregnetLag.filter(l => l.material === "cementgrout" || l.material === "cement_stolpe");
+    const totalCementKg = cementLag.reduce((s, l) => s + (parseFloat(l.kg)||0), 0);
+    // Typical batch: 1 bag (25kg) per ~22L -> estimate rows
+    const antalBlandinger = Math.max(10, Math.ceil(totalCementKg / 25));
+    const rowsPerPage = 22;
+
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
+
+    // First 2 rows with dato/pejling fields (only first row each day)
+    // Rest are continuation rows with just blanding nr.
+    let blandingNr = 1;
+    let datoRowCount = 0;
+
+    for (let ri = 0; ri < antalBlandinger; ri++) {
+      checkY(8);
+      const isNewDay = ri === 0; // first row gets date/pejling fields
+      doc.setFillColor(ri%2===0 ? 255:250, ri%2===0 ? 255:252, ri%2===0 ? 255:255);
+      doc.rect(10, y-4, W, 7.5, "F");
+      doc.setDrawColor(...[184,208,232]); doc.setLineWidth(0.2);
+      cCols.forEach((x, ci) => doc.rect(x, y-4, cWidths[ci], 7.5));
+      // Blanding nr
+      doc.setFont("helvetica","bold"); doc.setTextColor(...BLUE);
+      doc.text(String(blandingNr), cCols[3] + cWidths[3]/2, y, { align: "center" });
+      doc.setFont("helvetica","normal"); doc.setTextColor(...DARK);
+      blandingNr++;
+      y += 7.5;
+    }
+
+    // Totallinje
+    checkY(10);
+    doc.setFillColor(...[220,232,244]);
+    doc.rect(10, y-4, W, 8, "F");
+    doc.setFont("helvetica","bold"); doc.setFontSize(9); doc.setTextColor(...BLUE);
+    doc.text("TOTAL", 11, y);
+    doc.text("Planlagt: " + totalCementKg.toFixed(0) + " kg  (" + (totalCementKg/25).toFixed(1) + " poser á 25 kg)", 50, y);
+    y += 12;
+
+    // Note
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...GREY);
+    doc.text("* Bundpejling og rovandspejl angives kun første blanding for hvert arbejdsinterval.", 10, y);
+    doc.text("  v/w = vand-cement-forhold; typisk 0.6-0.8 for sløjfningsgrout.", 10, y+5);
+  }
+
   // Download
   const sagsnr = projekt.sagsnummer || "sloejfning";
   doc.save("Arbejdsinstruks_" + sagsnr + ".pdf");
