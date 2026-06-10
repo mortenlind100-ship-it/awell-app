@@ -616,18 +616,10 @@ function beregnVolumen(diaMm, laengdeM) {
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
 function diaVedDybde(dybde, forerSections, filterSections, brondDybde, brondDia) {
   // Brønd-zone: 0 til brondDybde m.u.t.
-  // Forerøret kan gå op igennem brønden – dybder er altid fra terræn (m.u.t.)
-  // og justeres IKKE med brondDybde.
+  // Materialet fylder hele brøndens tværsnit (Ø3000) – forerøret stikker bare op
+  // igennem brønden men fortrænger ikke materialet væsentligt i beregningen.
   if (brondDybde > 0 && brondDia > 0 && dybde <= brondDybde) {
-    // Inden for brønd-zonen: returner brøndens diameter MEDMINDRE boringen
-    // har en sektion her (boring går op igennem brønden)
-    for (const fs of (filterSections || [])) {
-      if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
-    }
-    for (const fr of (forerSections || [])) {
-      if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
-    }
-    return brondDia;  // Ingen boring-sektion her – ren brønd-zone
+    return brondDia;
   }
 
   // Nedenfor brønd (eller ingen brønd): brug boring-sektionernes dybder direkte
