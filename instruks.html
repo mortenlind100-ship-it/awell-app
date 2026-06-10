@@ -22,6 +22,243 @@
 <body>
 <div id="root"></div>
 <script>
+
+function genererAttest(projekt, primær, beregnetLag, attest) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const BLUE = [17, 105, 176], DARK = [26, 43, 60], GREY = [77, 98, 120];
+  const W = 190;
+  let y = 15;
+
+  const checkY = (n) => { if (y + n > 280) { doc.addPage(); y = 15; } };
+
+  const matFarver = {
+    bentonit_pellets:[107,142,35], bentonit_grout:[139,115,85],
+    cementgrout:[169,169,169], filtersand:[232,200,74],
+    aertesten:[210,180,140], stabilgrus:[200,184,154],
+    brogrus:[184,168,152], muld:[93,64,55], cement_stolpe:[128,128,128]
+  };
+  const matNavn = {
+    bentonit_pellets:"Bentonit pellets", bentonit_grout:"Bentonit grout",
+    cementgrout:"Cementgrout", filtersand:"Filtersand", aertesten:"Ærtesten",
+    stabilgrus:"Stabilgrus", brogrus:"Brogrus", muld:"Muld", cement_stolpe:"Stolpebeton"
+  };
+  function getFarve(mat) {
+    for (var k in matFarver) if (mat && mat.toLowerCase().includes(k.replace("_"," "))) return matFarver[k];
+    return [180,180,180];
+  }
+
+  // ── HEADER ────────────────────────────────────────────────────────────────
+  doc.setFillColor(...BLUE); doc.rect(0, 0, 210, 22, "F");
+  doc.setFontSize(16); doc.setFont("helvetica","bold"); doc.setTextColor(255,255,255);
+  doc.text("SLØJFNINGSATTEST", 10, 14);
+  doc.setFontSize(9); doc.setFont("helvetica","normal");
+  doc.text("Awell Brøndboring A/S", 145, 10);
+  if (projekt.sagsnummer) doc.text("Sag: " + projekt.sagsnummer, 145, 16);
+  y = 28;
+
+  // ── 1. PROJEKTINFO + BORINGSKONSTRUKTION side om side ─────────────────────
+  doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+  doc.text("Projekt og boringskonstruktion", 10, y); y += 5;
+  doc.setLineWidth(0.4); doc.setDrawColor(...BLUE); doc.line(10, y, 200, y); y += 4;
+
+  var col1 = [
+    ["Projektnummer", projekt.sagsnummer || "–"],
+    ["Projektnavn",   projekt.titel || "–"],
+    ["Adresse",       projekt.adresse || "–"],
+    ["Klient",        projekt.grundejerNavn || "–"],
+  ];
+  var bundpejlingVal = attest.bundpejling || (primær.bundpejling || primær.totaldybde || "–");
+  var forerDiaVal    = attest.forerDia    || (primær.forerSections && primær.forerSections[0] ? primær.forerSections[0].dia : "–");
+  var forerTopVal    = attest.forerTop    || (primær.forerSections && primær.forerSections[0] ? primær.forerSections[0].top : "–");
+  var col2 = [
+    ["DGU nr.",         primær.dgu || "–"],
+    ["Forerør Ø (mm)",  forerDiaVal + " mm"],
+    ["Forerør top",     forerTopVal + " m u. terræn"],
+    ["Bundpejling",     bundpejlingVal + " m u. terræn"],
+    ["Rovandspejl",     (attest.rovandspejl || primær.rovandspejl || "–") + " m u. terræn"],
+    ["Pejledato",       attest.pejledato || "–"],
+    ["Sløjfning udført",attest.dato || "–"],
+    ["Udført af",       attest.udfoertAf || "–"],
+  ];
+
+  doc.setFont("helvetica","normal"); doc.setFontSize(8.5);
+  var startY = y;
+  col1.forEach(function(r) {
+    checkY(7);
+    doc.setFillColor(240,246,252); doc.rect(10, y-4, 42, 6, "F");
+    doc.setFont("helvetica","bold"); doc.setTextColor(...GREY); doc.text(r[0], 11, y);
+    doc.setFont("helvetica","normal"); doc.setTextColor(...DARK); doc.text(String(r[1]), 54, y);
+    y += 7;
+  });
+  var y2 = startY;
+  col2.forEach(function(r) {
+    doc.setFillColor(240,246,252); doc.rect(106, y2-4, 42, 6, "F");
+    doc.setFont("helvetica","bold"); doc.setTextColor(...GREY); doc.text(r[0], 107, y2);
+    doc.setFont("helvetica","normal"); doc.setTextColor(...DARK); doc.text(String(r[1]), 150, y2);
+    y2 += 7;
+  });
+  y = Math.max(y, y2) + 4;
+
+  // ── 2. SLØJFNINGSPROFIL + TABEL side om side ──────────────────────────────
+  checkY(100);
+  doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+  doc.text("Sløjfningsprofil og mængder", 10, y); y += 5;
+  doc.setLineWidth(0.4); doc.setDrawColor(...BLUE); doc.line(10, y, 200, y); y += 4;
+
+  var faktLag = attest.faktiskeLag.length > 0
+    ? attest.faktiskeLag
+    : beregnetLag.filter(function(l){return l.fraDybde != null;}).map(function(l){
+        return { materiale: matNavn[l.material]||l.material,
+          fraM: l.fraDybde.toFixed(2), tilM: l.tilDybde.toFixed(2),
+          teoretiskKg: l.kg||"", faktiskKg: "" };
+      });
+
+  var profH = Math.min(100, faktLag.length * 15 + 10);
+  var maksMut = parseFloat(bundpejlingVal) || 0;
+  faktLag.forEach(function(l){ var v=parseFloat(l.tilM)||0; if(v>maksMut) maksMut=v; });
+
+  // Profil-søjle
+  var profX = 10, profW = 22;
+  if (maksMut > 0) {
+    // Terræn
+    doc.setDrawColor(...DARK); doc.setLineWidth(1.5);
+    doc.line(profX, y, profX + profW, y);
+    faktLag.forEach(function(l) {
+      var fra = parseFloat(l.fraM)||0, til = parseFloat(l.tilM)||fra;
+      var y1 = y + (fra/maksMut)*profH;
+      var y2 = Math.min(y + (til/maksMut)*profH, y + profH);
+      var farve = getFarve(l.materiale);
+      doc.setFillColor(farve[0], farve[1], farve[2]);
+      doc.rect(profX, y1, profW, y2-y1, "F");
+      doc.setDrawColor(180,180,180); doc.setLineWidth(0.2);
+      doc.rect(profX, y1, profW, y2-y1);
+    });
+    // Dybde-labels
+    doc.setFontSize(7); doc.setTextColor(...GREY);
+    [0, 0.25, 0.5, 0.75, 1].forEach(function(f){
+      var yd = y + f*profH;
+      doc.text((f*maksMut).toFixed(1), profX-1, yd+1, {align:"right"});
+      doc.setDrawColor(210,210,210); doc.setLineWidth(0.1);
+      doc.line(profX, yd, profX+profW, yd);
+    });
+    doc.setFontSize(7); doc.setTextColor(...GREY);
+    doc.text("m.u.t.", profX-1, y-2, {align:"right"});
+    doc.setDrawColor(...BLUE); doc.setLineWidth(0.3);
+    doc.rect(profX, y, profW, profH);
+  }
+
+  // Tabel ved siden af profil
+  var tabX = profX + profW + 6;
+  var tabW = W - profW - 6;
+  // Header
+  doc.setFillColor(...[220,232,244]);
+  doc.rect(tabX, y-4, tabW, 8, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(7.5); doc.setTextColor(...BLUE);
+  var cols = [tabX, tabX+40, tabX+60, tabX+80, tabX+100, tabX+120];
+  ["Materiale","Fra","Til","Teor. kg","Fakt. kg","Forskel"].forEach(function(h,i){
+    doc.text(h, cols[i]+1, y);
+  });
+  var rowY = y + 8;
+  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(...DARK);
+  faktLag.forEach(function(l, i) {
+    var rowH2 = 7;
+    if (i%2===1){ doc.setFillColor(248,251,254); doc.rect(tabX, rowY-4, tabW, rowH2, "F"); }
+    var farve = getFarve(l.materiale);
+    doc.setFillColor(farve[0],farve[1],farve[2]); doc.rect(tabX, rowY-4, 2, rowH2, "F");
+    doc.setTextColor(...DARK);
+    doc.text(l.materiale||"–", cols[0]+3, rowY);
+    doc.text(l.fraM||"–", cols[1]+1, rowY);
+    doc.text(l.tilM||"–", cols[2]+1, rowY);
+    doc.setFont("helvetica","bold");
+    doc.text(l.teoretiskKg ? l.teoretiskKg+" kg" : "–", cols[3]+1, rowY);
+    doc.setFont("helvetica","normal");
+    doc.text(l.faktiskKg ? l.faktiskKg+" kg" : "–", cols[4]+1, rowY);
+    // Forskel
+    var teor = parseFloat(l.teoretiskKg), fakt = parseFloat(l.faktiskKg);
+    if (!isNaN(teor) && !isNaN(fakt)) {
+      var diff = fakt - teor;
+      if (diff > 0) { doc.setTextColor(39, 174, 96); }
+      else if (diff < 0) { doc.setTextColor(192, 57, 57); }
+      else { doc.setTextColor(100, 100, 100); }
+      doc.text((diff>0?"+":"") + diff.toFixed(1)+" kg", cols[5]+1, rowY);
+      doc.setTextColor(...DARK);
+    }
+    rowY += rowH2;
+  });
+
+  // Total
+  var totTeor = faktLag.reduce(function(s,l){return s+(parseFloat(l.teoretiskKg)||0);},0);
+  var totFakt = faktLag.reduce(function(s,l){return s+(parseFloat(l.faktiskKg)||0);},0);
+  doc.setFillColor(...[220,232,244]);
+  doc.rect(tabX, rowY-4, tabW, 7, "F");
+  doc.setFont("helvetica","bold"); doc.setFontSize(8.5); doc.setTextColor(...BLUE);
+  doc.text("TOTAL", cols[0]+3, rowY);
+  doc.text(totTeor.toFixed(1)+" kg", cols[3]+1, rowY);
+  if (totFakt > 0) {
+    doc.text(totFakt.toFixed(1)+" kg", cols[4]+1, rowY);
+    var totDiff = totFakt-totTeor;
+    if (totDiff > 0) { doc.setTextColor(39, 174, 96); }
+    else if (totDiff < 0) { doc.setTextColor(192, 57, 57); }
+    else { doc.setTextColor(100, 100, 100); }
+    doc.text((totDiff>0?"+":"") + totDiff.toFixed(1)+" kg", cols[5]+1, rowY);
+  }
+
+  y = Math.max(y + profH, rowY) + 10;
+
+  // ── 3. CEMENTGROUT STØBEDATA ──────────────────────────────────────────────
+  var harCement = beregnetLag.some(function(l){return l.material==="cementgrout"||l.material==="cement_stolpe";});
+  if (harCement && (attest.antalBlandinger || attest.cementKg)) {
+    checkY(50);
+    doc.setFontSize(11); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+    doc.text("Cementgrout støbedata", 10, y); y += 5;
+    doc.setLineWidth(0.4); doc.setDrawColor(...BLUE); doc.line(10, y, 200, y); y += 6;
+    var cData = [
+      ["Antal blandinger total", (attest.antalBlandinger||"–") + " stk"],
+      ["Vol. per blanding",      (attest.volPerBlanding||"–") + " L"],
+      ["Total vol. nedpumpet",   attest.antalBlandinger && attest.volPerBlanding
+        ? (parseFloat(attest.antalBlandinger)*parseFloat(attest.volPerBlanding)).toFixed(0)+" L" : "–"],
+      ["Kontrolrumvægt",         (attest.kontrolRumvaegt||"–") + " g/cm³"],
+      ["Cementforbrug total",    (attest.cementKg||"–") + " kg"],
+      ["Bentonitforbrug",        (attest.bentonitKg||"–") + " kg"],
+    ];
+    doc.setFont("helvetica","normal"); doc.setFontSize(8.5);
+    cData.forEach(function(r,i) {
+      var cx = i < 3 ? 10 : 105;
+      var cy = i < 3 ? y + i*8 : y + (i-3)*8;
+      doc.setFillColor(240,246,252); doc.rect(cx, cy-4, 40, 6, "F");
+      doc.setFont("helvetica","bold"); doc.setTextColor(...GREY); doc.text(r[0], cx+1, cy);
+      doc.setFont("helvetica","normal"); doc.setTextColor(...DARK); doc.text(r[1], cx+42, cy);
+    });
+    y += Math.ceil(cData.length/2)*8 + 8;
+  }
+
+  // ── 4. NOTER ──────────────────────────────────────────────────────────────
+  if (attest.noter) {
+    checkY(20);
+    doc.setFontSize(10); doc.setFont("helvetica","bold"); doc.setTextColor(...DARK);
+    doc.text("Noter til sløjfningsarbejdet", 10, y); y += 6;
+    doc.setFont("helvetica","normal"); doc.setFontSize(8.5);
+    var noterLines = doc.splitTextToSize(attest.noter, W);
+    doc.text(noterLines, 10, y); y += noterLines.length * 5 + 6;
+  }
+
+  // ── FOOTER ────────────────────────────────────────────────────────────────
+  var pages = doc.internal.getNumberOfPages();
+  for (var p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.setDrawColor(200,200,200); doc.setLineWidth(0.2); doc.line(10, 287, 200, 287);
+    doc.text("Awell Brøndboring A/S  ·  Sløjfningsattest  ·  " + new Date().toLocaleDateString("da-DK"), 10, 292);
+    doc.text("Side " + p + " af " + pages, 185, 292);
+  }
+
+  var sagsnr = projekt.sagsnummer || "attest";
+  var dgu = primær.dgu || "";
+  doc.save("Sloejfningsattest_" + sagsnr + (dgu ? "_" + dgu.replace(".","_") : "") + ".pdf");
+}
+
+
 function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling, primær) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
@@ -1744,6 +1981,20 @@ function App() {
   const [grej, setGrej] = useState([]);
   const [friGrej, setFriGrej] = useState("");
 
+  // ── Attestdata: faktiske målinger ──────────────────────────────────────────
+  const [attest, setAttest] = useState({
+    dato: "",
+    udfoertAf: "",
+    bundpejling: "",
+    rovandspejl: "",
+    pejledato: "",
+    forerDia: "",
+    forerTop: "",
+    noter: "",
+    faktiskeLag: [],  // [{materiale, fraM, tilM, faktiskKg, teoretiskKg}]
+  });
+  const updA = (k, v) => setAttest(a => ({ ...a, [k]: v }));
+
   const updP = (k, v) => setProjekt(p => ({ ...p, [k]: v }));
 
   // Hent eller initialiser lag-array for en boring
@@ -1798,6 +2049,7 @@ function App() {
     { id: "grej",       label: "🔧 Grej"        },
     { id: "materialer", label: "📦 Materialer"  },
     { id: "generer",    label: "📄 Generer"     },
+    { id: "attest",     label: "📋 Attest"      },
   ];
 
   return (
@@ -2175,6 +2427,223 @@ function App() {
           <p style={{ fontSize: 12, color: C.text2, textAlign: "center", marginTop: 4 }}>
             PDF inkluderer sløjfningsprofil · Word åbnes i Microsoft Word
           </p>
+
+        {/* ── ATTEST ──────────────────────────────────────────────────────── */}
+        {fane === "attest" && <>
+          <Sekt n="7" title="Sløjfningsattest" icon="📋" />
+          <p style={{ fontSize: 13, color: C.text2, marginBottom: 16, lineHeight: 1.6 }}>
+            Udfyld de faktiske data fra sløjfningen. Attesten genereres som PDF og kan indsendes til GEUS.
+          </p>
+
+          {/* ── Boringsoversigt ─────────────────────────────────────── */}
+          <div style={{ background: C.white, border: "1px solid " + C.blue4,
+            borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 700,
+              fontSize: 13, color: C.blue, marginBottom: 12 }}>
+              Boringskonstruktion
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+              <F label="DGU-nummer"><input style={inp} value={primær.dgu || ""} readOnly /></F>
+              <F label="Adresse"><input style={inp} value={projekt.adresse || ""} readOnly /></F>
+              <F label="Forerør Ø, OD (mm)">
+                <input style={inp} type="number" value={attest.forerDia}
+                  onChange={e => updA("forerDia", e.target.value)}
+                  placeholder={primær.forerSections?.[0]?.dia || "f.eks. 254"} />
+              </F>
+              <F label="Forerør top (m.u.t.)">
+                <input style={inp} type="number" step="0.01" value={attest.forerTop}
+                  onChange={e => updA("forerTop", e.target.value)}
+                  placeholder={primær.forerSections?.[0]?.top || "f.eks. 2.5"} />
+              </F>
+              <F label="Bundpejling (m.u.t.)">
+                <input style={inp} type="number" step="0.01" value={attest.bundpejling}
+                  onChange={e => updA("bundpejling", e.target.value)}
+                  placeholder={bundpejling || ""} />
+              </F>
+              <F label="Rovandspejl (m.u.t.)">
+                <input style={inp} type="number" step="0.01" value={attest.rovandspejl}
+                  onChange={e => updA("rovandspejl", e.target.value)}
+                  placeholder={primær.rovandspejl || ""} />
+              </F>
+              <F label="Pejledato">
+                <input style={inp} type="date" value={attest.pejledato}
+                  onChange={e => updA("pejledato", e.target.value)} />
+              </F>
+              <F label="Sløjfning udført">
+                <input style={inp} type="date" value={attest.dato}
+                  onChange={e => updA("dato", e.target.value)} />
+              </F>
+              <F label="Udført af"><input style={inp} value={attest.udfoertAf}
+                onChange={e => updA("udfoertAf", e.target.value)}
+                placeholder="Navn / firma" /></F>
+              <F label="Sagsnummer"><input style={inp} value={projekt.sagsnummer || ""} readOnly /></F>
+            </div>
+          </div>
+
+          {/* ── Faktiske sløjfningsmængder ──────────────────────────── */}
+          <div style={{ background: C.white, border: "1px solid " + C.blue4,
+            borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 700,
+              fontSize: 13, color: C.blue, marginBottom: 12 }}>
+              Faktiske sløjfningsmængder
+            </div>
+
+            {/* Tabel-header */}
+            <div style={{ display: "grid",
+              gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr",
+              gap: "0 8px", marginBottom: 6 }}>
+              {["Materiale","Fra (m.u.t.)","Til (m.u.t.)","Teoretisk (kg)","Faktisk (kg)"].map(h => (
+                <div key={h} style={{ fontSize: 10, fontWeight: 700, color: C.blue,
+                  fontFamily: "'Montserrat',sans-serif", textTransform: "uppercase",
+                  letterSpacing: "0.3px" }}>{h}</div>
+              ))}
+            </div>
+
+            {/* Rækker baseret på beregnetLag – auto-udfyldt med teoretiske mængder */}
+            {(() => {
+              const matNavn = { bentonit_pellets:"Bentonit pellets",
+                bentonit_grout:"Bentonit grout", cementgrout:"Cementgrout",
+                filtersand:"Filtersand", aertesten:"Ærtesten",
+                stabilgrus:"Stabilgrus", brogrus:"Brogrus",
+                muld:"Muld", cement_stolpe:"Stolpebeton" };
+              const rows = attest.faktiskeLag.length > 0
+                ? attest.faktiskeLag
+                : beregnetLag.filter(l => l.fraDybde != null).map(l => ({
+                    materiale: matNavn[l.material] || l.material,
+                    fraM: l.fraDybde?.toFixed(2) || "",
+                    tilM: l.tilDybde?.toFixed(2) || "",
+                    teoretiskKg: l.kg || "",
+                    faktiskKg: "",
+                  }));
+
+              return rows.map((r, i) => (
+                <div key={i} style={{ display: "grid",
+                  gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr",
+                  gap: "0 8px", marginBottom: 6, alignItems: "center" }}>
+                  <input style={{ ...inp, fontSize: 12 }} value={r.materiale}
+                    onChange={e => {
+                      const next = [...(attest.faktiskeLag.length > 0 ? attest.faktiskeLag : rows)];
+                      next[i] = { ...next[i], materiale: e.target.value };
+                      updA("faktiskeLag", next);
+                    }} />
+                  <input style={{ ...inp, fontSize: 12 }} type="number" step="0.01"
+                    value={r.fraM}
+                    onChange={e => {
+                      const next = [...(attest.faktiskeLag.length > 0 ? attest.faktiskeLag : rows)];
+                      next[i] = { ...next[i], fraM: e.target.value };
+                      updA("faktiskeLag", next);
+                    }} />
+                  <input style={{ ...inp, fontSize: 12 }} type="number" step="0.01"
+                    value={r.tilM}
+                    onChange={e => {
+                      const next = [...(attest.faktiskeLag.length > 0 ? attest.faktiskeLag : rows)];
+                      next[i] = { ...next[i], tilM: e.target.value };
+                      updA("faktiskeLag", next);
+                    }} />
+                  <div style={{ ...inp, fontSize: 12, background: C.blue3,
+                    color: C.text2, display: "flex", alignItems: "center" }}>
+                    {r.teoretiskKg} kg
+                  </div>
+                  <input style={{ ...inp, fontSize: 12 }} type="number" step="0.1"
+                    placeholder="kg"
+                    value={r.faktiskKg}
+                    onChange={e => {
+                      const next = [...(attest.faktiskeLag.length > 0 ? attest.faktiskeLag : rows)];
+                      next[i] = { ...next[i], faktiskKg: e.target.value };
+                      updA("faktiskeLag", next);
+                    }} />
+                </div>
+              ));
+            })()}
+
+            {/* Tilføj/fjern lag-knapper */}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button style={btn("#34495e", { fontSize: 12, padding: "6px 12px" })}
+                onClick={() => {
+                  const cur = attest.faktiskeLag.length > 0
+                    ? attest.faktiskeLag
+                    : beregnetLag.filter(l=>l.fraDybde!=null).map(l=>({
+                        materiale:({"bentonit_pellets":"Bentonit pellets",bentonit_grout:"Bentonit grout",cementgrout:"Cementgrout",filtersand:"Filtersand",aertesten:"Ærtesten",stabilgrus:"Stabilgrus",brogrus:"Brogrus",muld:"Muld",cement_stolpe:"Stolpebeton"})[l.material]||l.material,
+                        fraM:l.fraDybde?.toFixed(2)||"",tilM:l.tilDybde?.toFixed(2)||"",
+                        teoretiskKg:l.kg||"",faktiskKg:""}));
+                  updA("faktiskeLag", [...cur, {materiale:"",fraM:"",tilM:"",teoretiskKg:"",faktiskKg:""}]);
+                }}>
+                + Tilføj lag
+              </button>
+              {attest.faktiskeLag.length > 0 && (
+                <button style={btn("#C0392B", { fontSize: 12, padding: "6px 12px" })}
+                  onClick={() => updA("faktiskeLag", attest.faktiskeLag.slice(0,-1))}>
+                  − Fjern sidste
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* ── Cementgrout støbedata ───────────────────────────────── */}
+          {beregnetLag.some(l => l.material === "cementgrout" || l.material === "cement_stolpe") && (
+            <div style={{ background: C.white, border: "1px solid " + C.blue4,
+              borderRadius: 10, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 700,
+                fontSize: 13, color: C.blue, marginBottom: 12 }}>
+                Cementgrout støbedata
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 16px" }}>
+                <F label="Antal blandinger total">
+                  <input style={inp} type="number"
+                    value={attest.antalBlandinger || ""}
+                    onChange={e => updA("antalBlandinger", e.target.value)} />
+                </F>
+                <F label="Volumen per blanding (L)">
+                  <input style={inp} type="number"
+                    value={attest.volPerBlanding || ""}
+                    onChange={e => updA("volPerBlanding", e.target.value)} />
+                </F>
+                <F label="Total vol. nedpumpet (L)">
+                  <input style={{ ...inp, background: C.blue3 }}
+                    readOnly
+                    value={attest.antalBlandinger && attest.volPerBlanding
+                      ? (parseFloat(attest.antalBlandinger) * parseFloat(attest.volPerBlanding)).toFixed(0) + " L"
+                      : ""} />
+                </F>
+                <F label="Kontrolrumvægt (g/cm³)">
+                  <input style={inp} type="number" step="0.01"
+                    value={attest.kontrolRumvaegt || ""}
+                    onChange={e => updA("kontrolRumvaegt", e.target.value)} />
+                </F>
+                <F label="Cementforbrug total (kg)">
+                  <input style={inp} type="number"
+                    value={attest.cementKg || ""}
+                    onChange={e => updA("cementKg", e.target.value)} />
+                </F>
+                <F label="Bentonitforbrug (kg)">
+                  <input style={inp} type="number"
+                    value={attest.bentonitKg || ""}
+                    onChange={e => updA("bentonitKg", e.target.value)} />
+                </F>
+              </div>
+            </div>
+          )}
+
+          {/* ── Noter ───────────────────────────────────────────────── */}
+          <F label="Noter til sløjfningsarbejdet" col2>
+            <textarea style={{ ...ta, minHeight: 60 }} value={attest.noter}
+              onChange={e => updA("noter", e.target.value)}
+              placeholder="Afvigelser, observationer, særlige forhold..." />
+          </F>
+
+          {/* ── Generer PDF ─────────────────────────────────────────── */}
+          <div style={{ marginTop: 20 }}>
+            <button style={{ ...btn(), width: "100%", padding: 14, fontSize: 15,
+              boxShadow: "0 3px 12px rgba(17,105,176,0.3)" }}
+              onClick={() => genererAttest(projekt, primær, beregnetLag, attest)}>
+              📋 Generer sløjfningsattest (PDF)
+            </button>
+            <p style={{ fontSize: 11, color: C.text2, textAlign: "center", marginTop: 6 }}>
+              Kan indsendes til GEUS og opgraderes som bilag til sagen
+            </p>
+          </div>
+        </>}
+
         </>}
 
       </div>
