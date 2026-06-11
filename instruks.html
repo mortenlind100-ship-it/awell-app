@@ -993,7 +993,7 @@ function beregnLag(lag, bundpejling, primærBoring) {
       const kgHer = Math.min(restKg, maxKgInterval);
       const hHer = kgHer / (lpm * mat.kgPerL);
       const subTil = fraDybde;
-      const subFra = Math.max(bpTop, fraDybde - hHer);
+      const subFra = fraDybde - hHer; // tillad negativ (overskud over terræn)
       subLag.unshift({ fra: subFra, til: subTil, dia: zoneDia });
       fraDybde = subFra;
       restKg -= kgHer;
@@ -1792,8 +1792,13 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
         </div>
       </div>
       {calc?.fraDybde != null && (
-        <div style={{ marginTop: 8, background: C.blue3, borderRadius: 5,
-          padding: "5px 10px", fontSize: 12, color: C.blue, fontWeight: 600 }}>
+        <div style={{ marginTop: 8,
+          background: calc.fraDybde < 0 ? "#fff3cd" : C.blue3,
+          borderRadius: 5, padding: "5px 10px", fontSize: 12,
+          color: calc.fraDybde < 0 ? "#8a6d3b" : C.blue, fontWeight: 600 }}>
+          {calc.fraDybde < 0
+            ? <span style={{ marginRight: 8 }}>⚠ {Math.abs(calc.fraDybde).toFixed(2)} m over terræn</span>
+            : null}
           📏 {calc.fraDybde.toFixed(2)} – {calc.tilDybde.toFixed(2)} m.u.t.
           &nbsp;·&nbsp; {calc.tykkelse.toFixed(2)} m tykkelse
           {calc.diaStr && <span style={{ marginLeft: 8, fontWeight: 400, color: C.text2 }}>
