@@ -183,6 +183,10 @@ const _jupiterHandler = async (req, res) => {
     if (jupAdr) naermestAdresse = jupAdr;
   }
 
+  // Forud-erklær filterSections så de er tilgængelige udenfor if(boreholeHtml)
+  let filterSections = [];
+  let filterSectionsUniq = [];
+
   // Extract key data from HTML
   let htmlData = {};
   let lithoFromHtml = [];
@@ -250,8 +254,7 @@ const _jupiterHandler = async (req, res) => {
     const filterAllRows = filterRows.filter(r => r.length >= 4);
 
     // Parse filter-sektioner: kun aktive perioder (periode slutter med " -")
-    let filterSections = [];
-    let filterSectionsUniq = [];
+    // (filterSections og filterSectionsUniq er forud-erklæret i ydre scope)
 
     if (filterAllRows.length >= 2) {
       const fHeaders    = filterAllRows[0].map(h2 => h2.toLowerCase().replace(/[()* ]/g, ""));
