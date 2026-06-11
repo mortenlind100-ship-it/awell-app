@@ -2657,7 +2657,7 @@ function App() {
               📱 Feltdataregistrering
             </div>
             <p style={{ fontSize: 12, color: C.text2, marginBottom: 12, lineHeight: 1.6 }}>
-              Opret en sløjfningsopgave i feltdata-appen (feltdata-v03.vercel.app) så teknikerne
+              Opret en sløjfningsopgave i feltdata-appen (feltdata-v25.vercel.app) så teknikerne
               kan registrere faktiske sløjfningsmængder direkte i marken.
             </p>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -2727,7 +2727,7 @@ function App() {
 
                   try {
                     // Opret boring via feltdata db.js (table= query param)
-                    const boringRes = await fetch("https://feltdata-v03.vercel.app/api/db?table=boringer", {
+                    const boringRes = await fetch("https://feltdata-v25.vercel.app/api/db?table=boringer", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify(boringPayload),
@@ -2742,7 +2742,7 @@ function App() {
                       ...opgavePayload,
                       wellId: opgavePayload.well_id,
                     };
-                    const opgaveRes = await fetch("https://feltdata-v03.vercel.app/api/db?table=opgaver", {
+                    const opgaveRes = await fetch("https://feltdata-v25.vercel.app/api/db?table=opgaver", {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify(opgavePayloadMapped),
@@ -2752,14 +2752,14 @@ function App() {
                       throw new Error(err2.error || "Opgave kunne ikke oprettes (HTTP " + opgaveRes.status + ")");
                     }
 
-                    alert("✅ Sløjfningsopgave oprettet!\n\nSagsnummer: " + (projekt.sagsnummer||"–") + "\nÅbn feltdata-v03.vercel.app på din telefon for at se opgaven.");
+                    alert("✅ Sløjfningsopgave oprettet!\n\nSagsnummer: " + (projekt.sagsnummer||"–") + "\nÅbn feltdata-v25.vercel.app på din telefon for at se opgaven.");
                   } catch(err) {
-                    alert("❌ Fejl: " + err.message + "\n\nTjek at du er online og at feltdata-v03.vercel.app er tilgængeligt.");
+                    alert("❌ Fejl: " + err.message + "\n\nTjek at du er online og at feltdata-v25.vercel.app er tilgængeligt.");
                   }
                 }}>
                 📱 Opret sløjfningsopgave i feltdata
               </button>
-              <a href="https://feltdata-v03.vercel.app" target="_blank" rel="noreferrer"
+              <a href="https://feltdata-v25.vercel.app" target="_blank" rel="noreferrer"
                 style={{ fontSize: 12, color: C.blue }}>
                 Åbn feltdata-appen ↗
               </a>
