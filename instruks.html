@@ -925,6 +925,27 @@ function beregnLag(lag, bundpejling, primærBoring) {
       return { ...l, fraDybde: null, tilDybde: null, tykkelse: null, subLag: [] };
     }
 
+    // Hvis en sektion er valgt, brug dens bounds direkte som tilDybde/fraDybde
+    // Dette sikrer at laget placeres præcis i sektionens interval uanset bundpejling
+    if (l.sektion && l.sektionFra != null && l.sektionTil != null) {
+      const sTil = parseFloat(l.sektionTil);
+      const sFra = parseFloat(l.sektionFra);
+      if (!isNaN(sTil) && !isNaN(sFra) && sTil > sFra) {
+        const subLagSektion = splitVedDiaSkift(sFra, sTil, forerSections, filterSections, brondDybde)
+          .map(s => {
+            const midDybde = (s.fra + s.til) / 2;
+            const subDia = diaVedDybde(midDybde, forerSections, filterSections, brondDybde, brondDia)
+                        || parseFloat(l.diaMm) || 0;
+            return { ...s, dia: subDia };
+          });
+        const diasArr = [...new Set(subLagSektion.map(s => s.dia).filter(Boolean))];
+        const diaStr = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : "";
+        dybde = sFra; // opdater dybde til sektionens top
+        return { ...l, fraDybde: sFra, tilDybde: sTil, tykkelse: sTil - sFra,
+          subLag: subLagSektion, diaStr };
+      }
+    }
+
     // Bestem startdiameter (ved nuværende dybde) – inkl. brønd-zone
     const startDia = diaVedDybde(dybde - 0.01, forerSections, filterSections,
                        brondDybde, brondDia)
@@ -1489,29 +1510,36 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
   const forerSek = (primær?.forerSections || []).map((s, idx) => ({
     id: "forer_" + idx,
     label: "Forerør  " + s.top + "–" + s.bund + " m  ·  Ø" + s.dia + " mm  ·  " + s.materiale,
-    dia: s.dia, laengde: s.bund - s.top,
+    dia: s.dia, laengde: s.bund - s.top, fraM: s.top, tilM: s.bund,
   }));
   const filterSek = (primær?.filterSections || []).map((s, idx) => ({
     id: "filter_" + idx,
     label: "Filter  " + s.fra + "–" + s.til + " m  ·  Ø" + s.dia + " mm  ·  " + s.materiale,
-    dia: s.dia, laengde: s.til - s.fra,
+    dia: s.dia, laengde: s.til - s.fra, fraM: s.fra, tilM: s.til,
   }));
   const brondSek = (primær?.type === "boring_med_brønd" || primær?.type === "brønd")
     && primær?.brondDia && primær?.brondDybde
     ? [{ id: "brond_0", label: "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm",
-        dia: parseFloat(primær.brondDia), laengde: parseFloat(primær.brondDybde) }]
+        dia: parseFloat(primær.brondDia), laengde: parseFloat(primær.brondDybde),
+        fraM: 0, tilM: parseFloat(primær.brondDybde) }]
     : [];
   const alleSektioner = [...brondSek, ...forerSek, ...filterSek];
 
   function valgSektion(sektionId, materialId) {
     if (!sektionId) {
-      onChange({ ...lag, sektion: "", kg: "" });
+      onChange({ ...lag, sektion: "", sektionFra: null, sektionTil: null, kg: "" });
       return;
     }
     const sek = alleSektioner.find(s => s.id === sektionId);
     if (!sek) return;
     const kg = beregnKgFraSektion(sek.dia, sek.laengde, materialId || lag.material);
-    onChange({ ...lag, sektion: sektionId, kg });
+    // Gem sektionens top/bund så beregnLag kan placere laget præcist
+    const fra = sek.id.startsWith("forer_") ? sek.fraM
+      : sek.id.startsWith("filter_") ? sek.fraM
+      : sek.id.startsWith("brond_") ? 0
+      : null;
+    const til = sek.laengde != null && fra != null ? fra + sek.laengde : null;
+    onChange({ ...lag, sektion: sektionId, sektionFra: fra, sektionTil: til, kg });
   }
 
   function valgMateriale(materialId) {
@@ -1702,7 +1730,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
         </div>
 
         {/* Profil-søjle */}
-        <div style={{ position: "relative", height: H, width: MAXW + 20,
+        <div style={{ position: "relative", height: H, width: MAXW + 45,
           flexShrink: 0 }}>
 
           {/* Bygger diaZoner fra subLag hvis ingen Jupiter-sektioner */}
@@ -1734,7 +1762,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
             })();
 
             return (
-              <svg width={MAXW + 20} height={H}
+              <svg width={MAXW + 45} height={H}
                 style={{ position: "absolute", top: 0, left: 0 }}>
                 {/* Baggrund / kontur-zoner */}
                 {allZoner.length === 0 && (
@@ -1766,8 +1794,8 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                         stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
                       <line x1={x1+w1} y1={y} x2={x2+w2} y2={y}
                         stroke={C.blue} strokeWidth={1.5} strokeDasharray="4,2" />
-                      <text x={MAXW+2} y={y+4} fontSize={8} fill={C.blue}>
-                        Ø{allZoner[i+1]?.dia}
+                      <text x={MAXW+3} y={y+4} fontSize={8} fill={C.blue}>
+                        {"Ø" + (allZoner[i+1] ? allZoner[i+1].dia : "")}
                       </text>
                     </g>
                   );
@@ -1775,7 +1803,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                 {/* Brønd-boring overgang */}
                 {harBrond && (
                   <line x1={0} y1={brondDybde / maks * H}
-                    x2={MAXW + 20} y2={brondDybde / maks * H}
+                    x2={MAXW + 45} y2={brondDybde / maks * H}
                     stroke="#2980b9" strokeWidth={2} strokeDasharray="5,3" />
                 )}
                 {/* Gruskastning – ydre buffer uden på sløjfningsprofil */}
@@ -1807,7 +1835,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                   );
                 })}
                 {/* Terræn-linje */}
-                <line x1={0} y1={0} x2={MAXW + 20} y2={0}
+                <line x1={0} y1={0} x2={MAXW + 45} y2={0}
                   stroke={C.text} strokeWidth={2} />
               </svg>
             );
@@ -1900,7 +1928,7 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
               return (
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 0 }}>
                   {/* Geologi-blokke absolut positionerede – ingen ekstra dybde-kolonne */}
-                  <div style={{ width: 120, flexShrink: 0, position: "relative",
+                  <div style={{ width: 180, flexShrink: 0, position: "relative",
                     height: geoH, border: "1px solid " + C.blue4, overflow: "hidden" }}>
                     {litho.map((l, i) => {
                       const fra = parseFloat(l.fraM) || 0;
@@ -1921,12 +1949,13 @@ function Profil({ lag, bundpejling, forerSections, filterSections, brondDybde, b
                           padding: "0 6px",
                           fontSize: 9, color: C.text, lineHeight: 1.2,
                         }}>
-                          {h2 > 10 && <span style={{ whiteSpace: "nowrap",
-                            overflow: "hidden", textOverflow: "ellipsis" }}>
-                            <span style={{ color: C.text2, marginRight: 4 }}>
+                          {h2 > 8 && <span style={{ whiteSpace: "nowrap",
+                            overflow: "hidden", textOverflow: "ellipsis",
+                            display: "block", fontSize: h2 > 14 ? 9 : 8 }}>
+                            <span style={{ color: C.text2, marginRight: 3, fontWeight: 600 }}>
                               {fra}–{til}
                             </span>
-                            {besk}
+                            {h2 > 12 ? besk : ""}
                           </span>}
                         </div>
                       );
