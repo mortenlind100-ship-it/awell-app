@@ -815,27 +815,33 @@ const GREJ_KATEGORIER = [
   {
     label: "🚛 Køretøjer og maskiner",
     items: [
-      "Lastbil", "Lille lastbil", "Minilæsser", "Minigraver (Loxam)",
-      "Gravemaskine", "Maskintrailer", "Kran / tre-ben",
+      "Lastbil", "Lille lastbil", "Minilæsser",
+      "Gravemaskine med brydehammer (Loxam)", "Gravemaskine", "Maskintrailer",
+      "Støbetrailer", "Minikran/Bæltekran",
     ],
   },
   {
     label: "🔧 Udstyr og værktøj",
     items: [
-      "Støbeanlæg", "Blandeanlæg", "Honda generator", "Kuffertgenerator",
+      "Blandeanlæg", "Honda generator", "Kuffertgenerator",
       "SQ pumpe", "Lænsepumpe 2\"", "Palletank",
-      "Bundpejl", "Rovandspejl", "Bundpejl + rovandspejl",
-      "Vinkelsliber", "Bajonetsav", "Borehammer", "Kædesav",
+      "Bundpejl", "Rovandspejl",
+      "Vinkelsliber", "Bajonetsav", "Brydehammer/borehammer", "Kædesav",
       "Trillebør", "Håndskovl", "Drænspade", "Rive", "Koben",
-      "Slange + kobling til vand", "Løftestropper", "Plastplader / køreplader",
+      "Løftestropper", "Plastplader / køreplader",
+      "Mukkert", "Støbeslange/støberør", "Snekkepumpe",
+      "Slange til SQ pumpe", "Slange til lænsepumpe",
+      "Tre-ben", "Rørklemme",
     ],
   },
   {
     label: "🦺 Sikkerhed og prøvetagning",
     items: [
       "Hjelm", "Høreværn og briller", "Blå overtrækssko",
-      "Mandhejs og sele",
-      "Glas til vandprøve (2 stk)",
+      "Støvmaske/åndedrætsværn", "Handsker", "Gul vest",
+      "Nøgle til boring",
+      "Mandehejs og sele",
+      "Prøveglas",
     ],
   },
 ];
@@ -2181,7 +2187,11 @@ function App() {
   // lagPerBoring: { [boringId]: lagArray }
   const [lagPerBoring, setLagPerBoring] = useState(() => ({ [boringer[0].id]: [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }] }));
   const [aktivBoring, setAktivBoring] = useState(boringer[0].id);
-  const [grej, setGrej] = useState([]);
+  const [grej, setGrej] = useState([
+    "Kuffertgenerator", "Lænsepumpe 2\"", "Slange til lænsepumpe",
+    "Bundpejl", "Rovandspejl", "SQ pumpe",
+    "Vinkelsliber", "Hjelm", "Høreværn og briller", "Støvmaske/åndedrætsværn",
+  ]);
   const [friGrej, setFriGrej] = useState("");
 
   // ── Attestdata: faktiske målinger ──────────────────────────────────────────
@@ -2638,6 +2648,124 @@ function App() {
           <p style={{ fontSize: 12, color: C.text2, textAlign: "center", marginTop: 4 }}>
             PDF inkluderer sløjfningsprofil · Word åbnes i Microsoft Word
           </p>
+
+          {/* ── Opret sløjfningsopgave i feltdata-app ─────────────────── */}
+          <div style={{ marginTop: 20, padding: 16, background: C.white,
+            border: "1px solid " + C.blue4, borderRadius: 10 }}>
+            <div style={{ fontFamily: "'Montserrat',sans-serif", fontWeight: 700,
+              fontSize: 13, color: C.blue, marginBottom: 8 }}>
+              📱 Feltdataregistrering
+            </div>
+            <p style={{ fontSize: 12, color: C.text2, marginBottom: 12, lineHeight: 1.6 }}>
+              Opret en sløjfningsopgave i feltdata-appen (feltdata-v03.vercel.app) så teknikerne
+              kan registrere faktiske sløjfningsmængder direkte i marken.
+            </p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button style={{ ...btn("#2ecc71"), padding: "10px 20px", fontSize: 13 }}
+                onClick={async () => {
+                  // Byg opgave-payload til feltdata Supabase
+                  const allBeregnetFelt = boringer.flatMap(b => {
+                    const bLag = getLag(b.id);
+                    const bBp = b.bundpejling || (b.type === "brønd" ? b.brondDybde : b.totaldybde) || null;
+                    return beregnLag(bLag, bBp, b).map(l => ({
+                      materiale: ({"bentonit_pellets":"Bentonit pellets",bentonit_grout:"Bentonit grout",
+                        cementgrout:"Cementgrout",filtersand:"Filtersand",aertesten:"Ærtesten",
+                        stabilgrus:"Stabilgrus",brogrus:"Brogrus",muld:"Muld",cement_stolpe:"Stolpebeton"})[l.material]||l.material,
+                      fraM: l.fraDybde?.toFixed(2) || "",
+                      tilM: l.tilDybde?.toFixed(2) || "",
+                      teoretiskKg: l.kg || "",
+                      faktiskKg: "",
+                      boringDgu: b.dgu || "",
+                    }));
+                  });
+
+                  const harCementFelt = boringer.flatMap(b => {
+                    const bLag = getLag(b.id);
+                    const bBp = b.bundpejling||(b.type==="brønd"?b.brondDybde:b.totaldybde)||null;
+                    return beregnLag(bLag,bBp,b);
+                  }).some(l => l.material==="cementgrout"||l.material==="cement_stolpe");
+
+                  const taskData = {
+                    sagsnummer:    projekt.sagsnummer || "",
+                    titel:         projekt.titel || "",
+                    adresse:       primær?.naermestAdresse || "",
+                    grundejer:     primær?.grundejerNavn || "",
+                    boringer: boringer.map(b => ({
+                      dgu:           b.dgu || "",
+                      type:          b.type || "",
+                      bundpejling:   b.bundpejling || b.totaldybde || "",
+                      rovandspejl:   b.rovandspejl || "",
+                      forerDia:      b.forerSections?.[0]?.dia || b.forerDia || "",
+                      forerTop:      b.forerSections?.[0]?.top || "",
+                      naermestAdresse: b.naermestAdresse || "",
+                    })),
+                    lag:           allBeregnetFelt,
+                    harCement:     harCementFelt,
+                    sloejfningsDato: "",
+                    udfoertAf:     "",
+                  };
+
+                  // Opret boring i feltdata-appen (uses same Supabase)
+                  const boringPayload = {
+                    id: "sloejf_" + (projekt.sagsnummer || Date.now()),
+                    name: (projekt.sagsnummer ? projekt.sagsnummer + " – " : "") +
+                          (primær?.naermestAdresse || primær?.dgu || "Sløjfning"),
+                    lat: null, lng: null,
+                    depth: primær?.bundpejling || primær?.totaldybde || "",
+                    rovand: primær?.rovandspejl || "",
+                    casing: { dia: primær?.forerSections?.[0]?.dia || "", top: primær?.forerSections?.[0]?.top || "" },
+                  };
+
+                  const opgavePayload = {
+                    id: "sloejf_op_" + Date.now(),
+                    well_id: boringPayload.id,
+                    type: "sloejfning",
+                    date: new Date().toISOString(),
+                    notes: "Sløjfningsinstruks: " + (projekt.sagsnummer || "") + " – " + (projekt.titel || ""),
+                    task_data: taskData,
+                  };
+
+                  try {
+                    // Opret boring via feltdata db.js (table= query param)
+                    const boringRes = await fetch("https://feltdata-v03.vercel.app/api/db?table=boringer", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(boringPayload),
+                    });
+                    if (!boringRes.ok) {
+                      const err2 = await boringRes.json().catch(() => ({}));
+                      throw new Error(err2.error || "Boring kunne ikke oprettes (HTTP " + boringRes.status + ")");
+                    }
+
+                    // Opret opgave – feltdata bruger wellId (camelCase)
+                    const opgavePayloadMapped = {
+                      ...opgavePayload,
+                      wellId: opgavePayload.well_id,
+                    };
+                    const opgaveRes = await fetch("https://feltdata-v03.vercel.app/api/db?table=opgaver", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify(opgavePayloadMapped),
+                    });
+                    if (!opgaveRes.ok) {
+                      const err2 = await opgaveRes.json().catch(() => ({}));
+                      throw new Error(err2.error || "Opgave kunne ikke oprettes (HTTP " + opgaveRes.status + ")");
+                    }
+
+                    alert("✅ Sløjfningsopgave oprettet!\n\nSagsnummer: " + (projekt.sagsnummer||"–") + "\nÅbn feltdata-v03.vercel.app på din telefon for at se opgaven.");
+                  } catch(err) {
+                    alert("❌ Fejl: " + err.message + "\n\nTjek at du er online og at feltdata-v03.vercel.app er tilgængeligt.");
+                  }
+                }}>
+                📱 Opret sløjfningsopgave i feltdata
+              </button>
+              <a href="https://feltdata-v03.vercel.app" target="_blank" rel="noreferrer"
+                style={{ fontSize: 12, color: C.blue }}>
+                Åbn feltdata-appen ↗
+              </a>
+            </div>
+          </div>
+
 
         {/* ── ATTEST ──────────────────────────────────────────────────────── */}
         {fane === "attest" && <>
