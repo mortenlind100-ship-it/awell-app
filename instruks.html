@@ -1467,7 +1467,7 @@ function BoringKort({ b, i, onChange, onFjern }) {
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.top}</span><span>{s.bund}</span>
-                    {(!s.dia || s.dia <= 0) && (s.materiale || "").toLowerCase().includes("uforet")
+                    {(!s.dia || s.dia <= 0) && ((s.materiale || "").toLowerCase().includes("uforet") || (s.materiale || "").trim() === "" || (s.materiale || "").trim() === "-")
                       ? <span style={{ fontWeight: 700, background: "#fff3cd",
                           border: "2px solid #f0ad4e", borderRadius: 4,
                           padding: "1px 6px", color: "#8a6d3b",
@@ -1527,7 +1527,7 @@ function BoringKort({ b, i, onChange, onFjern }) {
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.fra}</span><span>{s.til}</span>
-                    {(!s.dia || s.dia <= 0) && (s.materiale || "").toLowerCase().includes("uforet")
+                    {(!s.dia || s.dia <= 0) && ((s.materiale || "").toLowerCase().includes("uforet") || (s.materiale || "").trim() === "" || (s.materiale || "").trim() === "-")
                       ? <span style={{ fontWeight: 700, background: "#fff3cd",
                           border: "2px solid #f0ad4e", borderRadius: 4,
                           padding: "1px 6px", color: "#8a6d3b",
