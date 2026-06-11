@@ -1049,6 +1049,7 @@ async function hentJupiter(dguNr) {
     boreholeUrl:     b.boreholeUrl  || "",
     pdfUrl:          b.pdfUrl       || "",
     litho:           json.litho     || [],
+    naermestAdresse: json.boring?.naermestAdresse || "",
     gruskastning:    json.boring?.gruskastning || [],
   };
 }
@@ -1633,6 +1634,34 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
           </span>}
         </div>
       )}
+      <div style={{ marginBottom: 10 }}>
+        <label style={lbl}>Nærmeste adresse</label>
+        <input style={inp}
+          value={b.naermestAdresse || ""}
+          onChange={e => upd("naermestAdresse", e.target.value)}
+          placeholder={b.jupiterOk ? "Hentes fra koordinater..." : "Adresse (valgfri)"} />
+        {b.jupiterOk && !b.naermestAdresse && (
+          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
+            Slås op via DAWA baseret på boringens koordinater
+          </div>
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px", marginBottom: 10 }}>
+        <div>
+          <label style={lbl}>Grundejer / lodsejer</label>
+          <input style={inp}
+            value={b.grundejerNavn || ""}
+            onChange={e => upd("grundejerNavn", e.target.value)}
+            placeholder="Navn" />
+        </div>
+        <div>
+          <label style={lbl}>Grundejer tlf.</label>
+          <input style={inp}
+            value={b.grundejerTlf || ""}
+            onChange={e => upd("grundejerTlf", e.target.value)}
+            placeholder="Telefonnummer" />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1986,7 +2015,7 @@ function nyBoring() {
     totaldybde: "", rovandspejl: "",
     forerDia: "", forerBund: "", forerSections: [],
     filterFra: "", filterTil: "", filterDia: "", filterSections: [],
-    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [], gruskastning: [],
+    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [], gruskastning: [], naermestAdresse: "", grundejerNavn: "", grundejerTlf: "",
   };
 }
 
@@ -2131,9 +2160,7 @@ function App() {
             <F label="Titel / projekt"><input style={inp} value={projekt.titel}
               onChange={e => updP("titel", e.target.value)} placeholder="f.eks. Egedal grundvandspulje" /></F>
           </div>
-          <F label="Adresse" col2><input style={inp} value={projekt.adresse}
-            onChange={e => updP("adresse", e.target.value)}
-            placeholder="f.eks. Hagerupvej 7b, 3650 Ølstykke" /></F>
+          
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 20px" }}>
             <F label="Dato fra"><input style={inp} type="date" value={projekt.datoFra}
               onChange={e => updP("datoFra", e.target.value)} /></F>
@@ -2143,10 +2170,8 @@ function App() {
               onChange={e => updP("kontaktNavn", e.target.value)} /></F>
             <F label="Kontaktperson tlf"><input style={inp} value={projekt.kontaktTlf}
               onChange={e => updP("kontaktTlf", e.target.value)} placeholder="93 89 89 04" /></F>
-            <F label="Grundejer navn"><input style={inp} value={projekt.grundejerNavn}
-              onChange={e => updP("grundejerNavn", e.target.value)} /></F>
-            <F label="Grundejer tlf"><input style={inp} value={projekt.grundejerTlf}
-              onChange={e => updP("grundejerTlf", e.target.value)} /></F>
+            
+            
           </div>
           <div style={{ display: "flex", gap: 24, margin: "12px 0 16px",
             padding: "12px 16px", background: "#fff8e1", borderRadius: 8,
