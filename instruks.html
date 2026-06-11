@@ -1358,6 +1358,34 @@ function BoringKort({ b, i, onChange, onFjern }) {
         </a>}
       </div>}
 
+      <div style={{ marginBottom: 10 }}>
+        <label style={lbl}>Nærmeste adresse</label>
+        <input style={inp}
+          value={b.naermestAdresse || ""}
+          onChange={e => upd("naermestAdresse", e.target.value)}
+          placeholder={b.jupiterOk ? "Hentes automatisk fra koordinater..." : "Adresse (valgfri)"} />
+        {b.jupiterOk && !b.naermestAdresse && (
+          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
+            Slås op via DAWA baseret på boringens koordinater
+          </div>
+        )}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px", marginBottom: 10 }}>
+        <div>
+          <label style={lbl}>Grundejer / lodsejer</label>
+          <input style={inp}
+            value={b.grundejerNavn || ""}
+            onChange={e => upd("grundejerNavn", e.target.value)}
+            placeholder="Navn" />
+        </div>
+        <div>
+          <label style={lbl}>Grundejer tlf.</label>
+          <input style={inp}
+            value={b.grundejerTlf || ""}
+            onChange={e => upd("grundejerTlf", e.target.value)}
+            placeholder="Telefonnummer" />
+        </div>
+      </div>
       {/* Type */}
       <div style={{ marginBottom: 12 }}>
         <label style={lbl}>Type</label>
@@ -1488,6 +1516,7 @@ function BoringKort({ b, i, onChange, onFjern }) {
           placeholder="F.eks. artesisk, adgangsforhold, pumpe skal trækkes..."
           value={b.noter} onChange={e => upd("noter", e.target.value)} />
       </div>
+
     </div>
   );
 }
@@ -1634,34 +1663,7 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
           </span>}
         </div>
       )}
-      <div style={{ marginBottom: 10 }}>
-        <label style={lbl}>Nærmeste adresse</label>
-        <input style={inp}
-          value={b.naermestAdresse || ""}
-          onChange={e => upd("naermestAdresse", e.target.value)}
-          placeholder={b.jupiterOk ? "Hentes fra koordinater..." : "Adresse (valgfri)"} />
-        {b.jupiterOk && !b.naermestAdresse && (
-          <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
-            Slås op via DAWA baseret på boringens koordinater
-          </div>
-        )}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px", marginBottom: 10 }}>
-        <div>
-          <label style={lbl}>Grundejer / lodsejer</label>
-          <input style={inp}
-            value={b.grundejerNavn || ""}
-            onChange={e => upd("grundejerNavn", e.target.value)}
-            placeholder="Navn" />
-        </div>
-        <div>
-          <label style={lbl}>Grundejer tlf.</label>
-          <input style={inp}
-            value={b.grundejerTlf || ""}
-            onChange={e => upd("grundejerTlf", e.target.value)}
-            placeholder="Telefonnummer" />
-        </div>
-      </div>
+
     </div>
   );
 }
@@ -2054,6 +2056,16 @@ function App() {
   const updA = (k, v) => setAttest(a => ({ ...a, [k]: v }));
 
   const updP = (k, v) => setProjekt(p => ({ ...p, [k]: v }));
+
+  // Migrer eksisterende boringer til at have nye felter hvis de mangler
+  React.useEffect(() => {
+    setBoringer(prev => prev.map(b => ({
+      naermestAdresse: "",
+      grundejerNavn: "",
+      grundejerTlf: "",
+      ...b,  // eksisterende værdier overskriver defaults
+    })));
+  }, []);
 
   // Hent eller initialiser lag-array for en boring
   const getLag = (boringId) => lagPerBoring[boringId] || [{ id: uid(), material: "bentonit_pellets", kg: "", diaMm: "" }];
