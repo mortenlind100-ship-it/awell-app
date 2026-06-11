@@ -77,15 +77,31 @@ const _jupiterHandler = async (req, res) => {
     // Find the section containing the heading
     const hIdx = html.toLowerCase().indexOf(heading.toLowerCase());
     if (hIdx === -1) return rows;
-    // Afgræns til næste sektion-overskrift (h2/h3/h4 eller <b> på ny linje)
+    // Afgræns til slutningen af FØRSTE tabel efter headingen
     // for at undgå at Lerspærre, Gruskastning mv. blandes ind
     const rawSection = html.slice(hIdx, hIdx + 8000);
-    const nextHeadingMatch = rawSection.slice(heading.length + 10).search(
-      /<(h[2-4]|b)[\s>]/i
-    );
-    const section = nextHeadingMatch > 0
-      ? rawSection.slice(0, heading.length + 10 + nextHeadingMatch)
-      : rawSection;
+    // Find <table og derefter tilsvarende </table>
+    const tableStart = rawSection.indexOf("<table");
+    let section = rawSection;
+    if (tableStart >= 0) {
+      // Find den matchende </table> ved at tælle nesting
+      let depth = 0, pos = tableStart;
+      while (pos < rawSection.length) {
+        const openIdx  = rawSection.indexOf("<table", pos);
+        const closeIdx = rawSection.indexOf("</table", pos);
+        if (closeIdx < 0) break;
+        if (openIdx >= 0 && openIdx < closeIdx) {
+          depth++; pos = openIdx + 6;
+        } else {
+          depth--;
+          pos = closeIdx + 7;
+          if (depth <= 0) {
+            section = rawSection.slice(0, pos);
+            break;
+          }
+        }
+      }
+    }
     const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rm;
     while ((rm = rowRe.exec(section)) !== null) {
