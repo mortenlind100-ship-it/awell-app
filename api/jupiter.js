@@ -163,13 +163,24 @@ const _jupiterHandler = async (req, res) => {
       const dawaUrl = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
         + "?x=" + dUtmx.toFixed(2)
         + "&y=" + dUtmy.toFixed(2)
-        + "&srid=25832&struktur=mini";
-      const dr = await fetch(dawaUrl, { signal: AbortSignal.timeout(4000) });
+        + "&srid=25832";
+      const dr = await fetch(dawaUrl, { signal: AbortSignal.timeout(6000) });
       if (dr.ok) {
         const da = await dr.json();
-        naermestAdresse = da.betegnelse || da.adressebetegnelse || null;
+        naermestAdresse = da.betegnelse || da.adressebetegnelse
+          || (da.vejstykke && da.husnr
+              ? da.vejstykke.navn + " " + da.husnr + ", " + (da.postnummer ? da.postnummer.nr + " " + da.postnummer.navn : "")
+              : null);
       }
-    } catch(_) {}
+    } catch(dawaErr) {
+      // DAWA fejlede – forsøger Jupiter-adresse som fallback
+    }
+  }
+  // Fallback: brug Jupiter's egen adresse (bf.sted1 + postnr) hvis DAWA slog fejl
+  if (!naermestAdresse) {
+    const jupAdr = [bf.sted1, bf.postnr ? bf.postnr + " " + (bf.kommunenavn || "") : ""]
+      .filter(Boolean).join(", ").trim();
+    if (jupAdr) naermestAdresse = jupAdr;
   }
 
   // Extract key data from HTML
@@ -262,7 +273,7 @@ const _jupiterHandler = async (req, res) => {
           // Aktiv: slutter med bindestreg ELLER periode er tom (ingen slutdato angivet)
           aktiv: /[-–]\s*$/.test(periode) || periode.trim() === "",
         };
-      }).filter(s => s.dia > 0 && s.til > 0);
+      }).filter(s => s.til > 0 && s.fra >= 0); // dia=0 tilladt (uforet/åben boring)
 
       // Forsøg 1: kun aktive perioder
       const aktive = alleRaekker.filter(s => s.aktiv);
@@ -465,6 +476,12 @@ const _jupiterHandler = async (req, res) => {
   const cykloUrl = `https://data.geus.dk/geusmapmore/get_cyklogram.jsp?borid=${borid}`;
 
   return res.status(200).json({
+    debug: {
+      filterRowsCount: filterSections.length,
+      filterRowsRaw: filterSections.slice(0, 5),
+      hScopeLen: boreholeHtml ? Math.min(boreholeHtml.indexOf("Boringsopbygning") >= 0 ? boreholeHtml.indexOf("Boringsopbygning") + 20000 : boreholeHtml.length, boreholeHtml.length) : 0,
+      hasFiltre: boreholeHtml ? boreholeHtml.includes("Filtre") : false,
+    },
     boring: {
       dguNr:       bf.dgunr       || htmlData.dguNr    || dgu,
       boringsid:   borid,
