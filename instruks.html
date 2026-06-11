@@ -915,8 +915,11 @@ function beregnLag(lag, bundpejling, primærBoring) {
   const filterSections = primærBoring?.filterSections || [];
   const brondDybde     = (primærBoring?.type === "boring_med_brønd")
                           ? (parseFloat(primærBoring?.brondDybde) || 0) : 0;
-  const brondDia       = brondDybde > 0
-                          ? (parseFloat(primærBoring?.brondDia) || 0) : 0;
+  // For firkantet brønd: beregn ækvivalent cirkeldiameter = 2*sqrt(L*B/π)
+  const brondDiaRaw    = primærBoring?.brondFirkantet && primærBoring?.brondLaengde && primærBoring?.brondBredde
+    ? 2 * Math.sqrt((parseFloat(primærBoring.brondLaengde) * parseFloat(primærBoring.brondBredde)) / Math.PI)
+    : (parseFloat(primærBoring?.brondDia) || 0);
+  const brondDia       = brondDybde > 0 ? brondDiaRaw : 0;
 
   return [...lag].reverse().map(l => {
     const mat = MATERIALER.find(m => m.id === l.material);
@@ -1460,7 +1463,28 @@ function BoringKort({ b, i, onChange, onFjern }) {
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.top}</span><span>{s.bund}</span>
-                    <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
+                    {(!s.dia || s.dia <= 0) && (s.materiale || "").toLowerCase().includes("uforet")
+                      ? <span style={{ fontWeight: 700, background: "#fff3cd",
+                          border: "2px solid #f0ad4e", borderRadius: 4,
+                          padding: "1px 6px", color: "#8a6d3b",
+                          cursor: "pointer" }}
+                          title="Diameter ikke angivet – se originale borerapporter under 'Digitale dokumenter'"
+                          onClick={() => {
+                            const v = prompt(
+                              "Angiv diameter (mm) for åben kalk-zone " + s.fra + "–" + s.til + " m.u.t.\n" +
+                              "Kan findes i originale borerapporter under 'Digitale dokumenter' i Jupiter."
+                            );
+                            if (v && !isNaN(parseFloat(v))) {
+                              const updated = b.filterSections.map((fs, fi) =>
+                                fi === i ? { ...fs, dia: parseFloat(v) } : fs
+                              );
+                              onChange({ ...b, filterSections: updated });
+                            }
+                          }}>
+                          ⚠ Angiv Ø
+                        </span>
+                      : <span style={{ fontWeight: 700 }}>{s.dia > 0 ? s.dia + " mm" : "–"}</span>
+                    }
                     <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
                     <span style={{ fontWeight: 600, color: C.blue }}>{vol ? vol.toFixed(1) + " L" : "–"}</span>
                   </div>
@@ -1499,7 +1523,28 @@ function BoringKort({ b, i, onChange, onFjern }) {
                     background: i % 2 === 0 ? C.white : C.blue3,
                     borderTop: "1px solid " + C.blue4 }}>
                     <span>{s.fra}</span><span>{s.til}</span>
-                    <span style={{ fontWeight: 700 }}>{s.dia} mm</span>
+                    {(!s.dia || s.dia <= 0) && (s.materiale || "").toLowerCase().includes("uforet")
+                      ? <span style={{ fontWeight: 700, background: "#fff3cd",
+                          border: "2px solid #f0ad4e", borderRadius: 4,
+                          padding: "1px 6px", color: "#8a6d3b",
+                          cursor: "pointer" }}
+                          title="Diameter ikke angivet – se originale borerapporter under 'Digitale dokumenter'"
+                          onClick={() => {
+                            const v = prompt(
+                              "Angiv diameter (mm) for åben kalk-zone " + s.fra + "–" + s.til + " m.u.t.\n" +
+                              "Kan findes i originale borerapporter under 'Digitale dokumenter' i Jupiter."
+                            );
+                            if (v && !isNaN(parseFloat(v))) {
+                              const updated = b.filterSections.map((fs, fi) =>
+                                fi === i ? { ...fs, dia: parseFloat(v) } : fs
+                              );
+                              onChange({ ...b, filterSections: updated });
+                            }
+                          }}>
+                          ⚠ Angiv Ø
+                        </span>
+                      : <span style={{ fontWeight: 700 }}>{s.dia > 0 ? s.dia + " mm" : "–"}</span>
+                    }
                     <span style={{ color: C.text2 }}>{s.materiale || "–"}</span>
                     <span style={{ fontWeight: 600, color: C.blue }}>{vol ? vol.toFixed(1) + " L" : "–"}</span>
                   </div>
@@ -1520,18 +1565,72 @@ function BoringKort({ b, i, onChange, onFjern }) {
         </>}
 
         {harBrønd && <>
-          <div style={{ marginBottom: 10 }}>
+          <div style={{ marginBottom: 8 }}>
             <label style={lbl}>Brønd indv. Ø (mm)</label>
-            <input style={inp} type="number"
-              placeholder="f.eks. 1000"
-              value={b.brondDia} onChange={e => upd("brondDia", e.target.value)} />
+            <input style={{ ...inp, background: b.brondFirkantet ? C.blue3 : undefined }}
+              type="number"
+              placeholder={b.brondFirkantet ? "Beregnes fra L×B" : "f.eks. 1000"}
+              disabled={!!b.brondFirkantet}
+              value={b.brondFirkantet
+                ? (b.brondLaengde && b.brondBredde
+                    ? Math.round(2 * Math.sqrt((parseFloat(b.brondLaengde) * parseFloat(b.brondBredde)) / Math.PI)).toString()
+                    : "")
+                : b.brondDia}
+              onChange={e => !b.brondFirkantet && upd("brondDia", e.target.value)} />
           </div>
-          <div style={{ marginBottom: 10 }}>
+
+          {/* Firkantet brønd toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 10,
+            marginBottom: 10, padding: "6px 10px",
+            background: b.brondFirkantet ? "#e8f0fe" : C.blue3,
+            borderRadius: 6, border: "1px solid " + C.blue4 }}>
+            <input type="checkbox" id={"firkant-" + b.id}
+              checked={!!b.brondFirkantet}
+              onChange={e => upd("brondFirkantet", e.target.checked)}
+              style={{ width: 16, height: 16, cursor: "pointer" }} />
+            <label htmlFor={"firkant-" + b.id}
+              style={{ fontSize: 12, fontWeight: 600, color: C.text,
+                cursor: "pointer", userSelect: "none" }}>
+              Firkantet brønd
+            </label>
+            {b.brondFirkantet && <>
+              <div style={{ display: "flex", gap: 6, marginLeft: 8, flex: 1 }}>
+                <div>
+                  <div style={{ fontSize: 9, color: C.text2, marginBottom: 2 }}>LÆNGDE (mm)</div>
+                  <input style={{ ...inp, padding: "4px 8px", fontSize: 12, width: 80 }}
+                    type="number" step="1" placeholder="f.eks. 1200"
+                    value={b.brondLaengde || ""}
+                    onChange={e => upd("brondLaengde", e.target.value)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: C.text2, marginBottom: 2 }}>BREDDE (mm)</div>
+                  <input style={{ ...inp, padding: "4px 8px", fontSize: 12, width: 80 }}
+                    type="number" step="1" placeholder="f.eks. 1000"
+                    value={b.brondBredde || ""}
+                    onChange={e => upd("brondBredde", e.target.value)} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 9, color: C.text2, marginBottom: 2 }}>DYBDE (m.u.t.)</div>
+                  <input style={{ ...inp, padding: "4px 8px", fontSize: 12, width: 80 }}
+                    type="number" step="0.01" placeholder="f.eks. 4.8"
+                    value={b.brondDybde}
+                    onChange={e => upd("brondDybde", e.target.value)} />
+                </div>
+              </div>
+              {b.brondLaengde && b.brondBredde && (
+                <div style={{ fontSize: 10, color: C.text2, whiteSpace: "nowrap" }}>
+                  Ækvivalent Ø: {Math.round(2 * Math.sqrt((parseFloat(b.brondLaengde) * parseFloat(b.brondBredde)) / Math.PI))} mm
+                </div>
+              )}
+            </>}
+          </div>
+
+          {!b.brondFirkantet && <div style={{ marginBottom: 10 }}>
             <label style={lbl}>Brønd dybde (m.u.t.)</label>
             <input style={inp} type="number" step="0.01"
               placeholder="f.eks. 4.8"
               value={b.brondDybde} onChange={e => upd("brondDybde", e.target.value)} />
-          </div>
+          </div>}
         </>}
       </div>
 
@@ -1574,8 +1673,14 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
   }));
   const brondSek = (primær?.type === "boring_med_brønd" || primær?.type === "brønd")
     && primær?.brondDia && primær?.brondDybde
-    ? [{ id: "brond_0", label: "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm",
-        dia: parseFloat(primær.brondDia), laengde: parseFloat(primær.brondDybde),
+    ? [{ id: "brond_0",
+        label: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
+          ? "Brønd  0–" + primær.brondDybde + " m  ·  " + primær.brondLaengde + "×" + primær.brondBredde + " mm (firkantet)"
+          : "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm",
+        dia: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
+          ? 2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI)
+          : parseFloat(primær.brondDia),
+        laengde: parseFloat(primær.brondDybde),
         fraM: 0, tilM: parseFloat(primær.brondDybde) }]
     : [];
   const alleSektioner = [...brondSek, ...forerSek, ...filterSek];
@@ -2037,7 +2142,7 @@ function nyBoring() {
     bundpejling: "", rovandspejlFelt: "",
     forerDiaFelt: "", forerBundFelt: "",
     filterDiaFelt: "", filterFraFelt: "", filterTilFelt: "",
-    brondDia: "", brondDybde: "", noter: "",
+    brondDia: "", brondDybde: "", brondFirkantet: false, brondLaengde: "", brondBredde: "", noter: "",
     jupiterOk: false, jupiterAdresse: "",
     totaldybde: "", rovandspejl: "",
     forerDia: "", forerBund: "", forerSections: [],
@@ -2333,7 +2438,9 @@ function App() {
             forerSections={primær.forerSections}
             filterSections={primær.filterSections}
             brondDybde={brondDybde}
-            brondDia={parseFloat(primær.brondDia) || 0}
+            brondDia={primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
+              ? 2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI)
+              : parseFloat(primær.brondDia) || 0}
             type={primær.type}
             litho={primær.litho || []}
             gruskastning={primær.gruskastning || []} />
