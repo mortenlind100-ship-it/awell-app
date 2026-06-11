@@ -1050,6 +1050,8 @@ async function hentJupiter(dguNr) {
     pdfUrl:          b.pdfUrl       || "",
     litho:           json.litho     || [],
     naermestAdresse: json.boring?.naermestAdresse || "",
+    utmx: json.boring?.utmx || null,
+    utmy: json.boring?.utmy || null,
     gruskastning:    json.boring?.gruskastning || [],
   };
 }
@@ -1360,13 +1362,36 @@ function BoringKort({ b, i, onChange, onFjern }) {
 
       <div style={{ marginBottom: 10 }}>
         <label style={lbl}>Nærmeste adresse</label>
-        <input style={inp}
-          value={b.naermestAdresse || ""}
-          onChange={e => upd("naermestAdresse", e.target.value)}
-          placeholder={b.jupiterOk ? "Hentes automatisk fra koordinater..." : "Adresse (valgfri)"} />
-        {b.jupiterOk && !b.naermestAdresse && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <input style={{ ...inp, flex: 1 }}
+            value={b.naermestAdresse || ""}
+            onChange={e => upd("naermestAdresse", e.target.value)}
+            placeholder="Adresse" />
+          {b.utmx && b.utmy && (
+            <button
+              style={{ ...btn("#34495e"), padding: "0 10px", fontSize: 11,
+                whiteSpace: "nowrap", flexShrink: 0 }}
+              onClick={async () => {
+                upd("naermestAdresse", "Søger...");
+                try {
+                  const r = await fetch(
+                    "https://api.dataforsyningen.dk/adgangsadresser/reverse" +
+                    "?x=" + b.utmx + "&y=" + b.utmy + "&srid=25832&struktur=mini"
+                  );
+                  const d = await r.json();
+                  upd("naermestAdresse", d.betegnelse || d.adressebetegnelse || "");
+                } catch(e) {
+                  upd("naermestAdresse", "");
+                  alert("Kunne ikke slå adresse op via DAWA");
+                }
+              }}>
+              📍 DAWA
+            </button>
+          )}
+        </div>
+        {b.utmx && b.utmy && (
           <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>
-            Slås op via DAWA baseret på boringens koordinater
+            UTM: {b.utmx?.toFixed(0)}, {b.utmy?.toFixed(0)}
           </div>
         )}
       </div>
@@ -2017,7 +2042,7 @@ function nyBoring() {
     totaldybde: "", rovandspejl: "",
     forerDia: "", forerBund: "", forerSections: [],
     filterFra: "", filterTil: "", filterDia: "", filterSections: [],
-    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [], gruskastning: [], naermestAdresse: "", grundejerNavn: "", grundejerTlf: "",
+    kommune: "", boreholeUrl: "", pdfUrl: "", litho: [], gruskastning: [], naermestAdresse: "", grundejerNavn: "", grundejerTlf: "", utmx: null, utmy: null,
   };
 }
 
