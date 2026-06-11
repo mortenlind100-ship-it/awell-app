@@ -1308,6 +1308,10 @@ function BoringKort({ b, i, onChange, onFjern }) {
         boreholeUrl:    d.boreholeUrl,
         pdfUrl:         d.pdfUrl,
         litho:          d.litho || b.litho || [],
+        gruskastning:   d.gruskastning   || b.gruskastning || [],
+        naermestAdresse: d.naermestAdresse || b.naermestAdresse || "",
+        utmx:           d.utmx           || b.utmx || null,
+        utmy:           d.utmy           || b.utmy || null,
       });
     } catch (e) { setFejl(e.message); }
     setLader(false);
@@ -1756,7 +1760,11 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
         <div>
           <label style={lbl}>Mængde (kg)</label>
           <input style={inp} type="number" step="0.1"
-            value={lag.kg} onChange={e => upd("kg", e.target.value)} placeholder="kg" />
+            value={lag.kg} onChange={e => {
+                // Ryd sektionsgrænser når kg ændres manuelt
+                // -> beregnLag bruger iterativ beregning i stedet for fast placering
+                onChange({ ...lag, kg: e.target.value, sektionFra: null, sektionTil: null });
+              }} placeholder="kg" />
           {mat && <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>{mat.kgPerL} kg/L</div>}
         </div>
         <div>
