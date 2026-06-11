@@ -154,6 +154,24 @@ const _jupiterHandler = async (req, res) => {
     })(),
   ]);
 
+  // ── DAWA: Nærmeste adresse fra UTM-koordinater ───────────────────────────
+  let naermestAdresse = null;
+  const dUtmx = utmx || parseFloat(bf.xutm);
+  const dUtmy = utmy || parseFloat(bf.yutm);
+  if (dUtmx > 0 && dUtmy > 0) {
+    try {
+      const dawaUrl = "https://api.dataforsyningen.dk/adgangsadresser/reverse"
+        + "?x=" + dUtmx.toFixed(2)
+        + "&y=" + dUtmy.toFixed(2)
+        + "&srid=25832&struktur=mini";
+      const dr = await fetch(dawaUrl, { signal: AbortSignal.timeout(4000) });
+      if (dr.ok) {
+        const da = await dr.json();
+        naermestAdresse = da.betegnelse || da.adressebetegnelse || null;
+      }
+    } catch(_) {}
+  }
+
   // Extract key data from HTML
   let htmlData = {};
   let lithoFromHtml = [];
@@ -241,7 +259,8 @@ const _jupiterHandler = async (req, res) => {
           materiale: materIdx >= 0 ? ((r[materIdx] ?? "").trim()) : "",
           periode,
           // Aktiv = perioden slutter med " -" (åben slutdato = stadig aktiv)
-          aktiv: /[-–]\s*$/.test(periode),
+          // Aktiv: slutter med bindestreg ELLER periode er tom (ingen slutdato angivet)
+          aktiv: /[-–]\s*$/.test(periode) || periode.trim() === "",
         };
       }).filter(s => s.dia > 0 && s.til > 0);
 
@@ -461,6 +480,7 @@ const _jupiterHandler = async (req, res) => {
       region:      bf.region_tekst,
       adresse:     bf.sted1,
       postnr:      bf.postnr,
+      naermestAdresse: naermestAdresse,
       utmx:        utmx            || parseFloat(bf.xutm),
       utmy:        utmy            || parseFloat(bf.yutm),
       kote:        bf.terraen_kote,
