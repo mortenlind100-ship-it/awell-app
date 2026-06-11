@@ -77,7 +77,15 @@ const _jupiterHandler = async (req, res) => {
     // Find the section containing the heading
     const hIdx = html.toLowerCase().indexOf(heading.toLowerCase());
     if (hIdx === -1) return rows;
-    const section = html.slice(hIdx, hIdx + 8000);
+    // Afgræns til næste sektion-overskrift (h2/h3/h4 eller <b> på ny linje)
+    // for at undgå at Lerspærre, Gruskastning mv. blandes ind
+    const rawSection = html.slice(hIdx, hIdx + 8000);
+    const nextHeadingMatch = rawSection.slice(heading.length + 10).search(
+      /<(h[2-4]|b)[\s>]/i
+    );
+    const section = nextHeadingMatch > 0
+      ? rawSection.slice(0, heading.length + 10 + nextHeadingMatch)
+      : rawSection;
     const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rm;
     while ((rm = rowRe.exec(section)) !== null) {
@@ -280,7 +288,9 @@ const _jupiterHandler = async (req, res) => {
 
       // Forsøg 1: kun aktive perioder
       const aktive = alleRaekker.filter(s => s.aktiv);
-      const kandidater = aktive.length > 0 ? aktive : alleRaekker;
+      // Brug KUN aktive perioder – ingen fallback til udgåede sektioner
+      // (udgåede sektioner som "- 3. juli 2009" skal ikke medtages)
+      const kandidater = aktive;
 
       // Deduplikér på fra+til+dia
       filterSectionsUniq = kandidater.filter((s, i, arr) =>
