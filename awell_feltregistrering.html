@@ -963,11 +963,47 @@ function PumpImageCapture({ image, onAdd, onRemove }) {
 function App() {
   const [tab, setTab] = useState("new");
   const [view, setView] = useState("wells"); // wells | task | detail
-  const [wells, setWells] = useState([
-    { id: "w1", name: "Boring DGU 206.1234", lat: 56.1234, lng: 10.5678, depth: 42, rovand: "", maalepunkt: "Overside forerør", maalepunktHoejde: "", casing: { innerDia: 110, outerDia: 125, material: "PVC", flangeDN: "DN100", flangeHoleDia: "" }, hasPump: true, pump: { type: "Nedsænkspumpe", riserType: "Stålrør", riserDepth: 35, riserDim: '3"', riserDimCustom: "", riserLength: 35, riserCount: 1, nippleDim: "", pumpImage: null }, hasWellChamber: false, wellChamber: { depth: "", ringDia: "", ringCount: "" }, wellImages: [] },
-    { id: "w2", name: "Boring DGU 207.5678", lat: 55.6789, lng: 12.3456, depth: 28, rovand: "", maalepunkt: "", maalepunktHoejde: "", casing: { innerDia: 90, outerDia: 110, material: "PE", flangeDN: "", flangeHoleDia: "" }, hasPump: false, pump: { type: "", riserType: "Stålrør", riserDepth: "", riserDim: '2"', riserDimCustom: "", riserLength: "", riserCount: "", nippleDim: "", pumpImage: null }, hasWellChamber: true, wellChamber: { depth: "3", ringDia: "1000", ringCount: "3" }, wellImages: [] },
-  ]);
+  const [wells, setWells] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [dbLoaded, setDbLoaded] = useState(false);
+
+  const DB = "/api/db";
+
+  // ── Hent boringer + opgaver fra Supabase ved startup ────────────────────
+  React.useEffect(() => {
+    Promise.all([
+      fetch(DB + "?action=list&table=boringer").then(r => r.json()).catch(() => []),
+      fetch(DB + "?action=list&table=opgaver").then(r => r.json()).catch(() => []),
+    ]).then(([boringerData, opgaverData]) => {
+      if (Array.isArray(boringerData)) {
+        setWells(boringerData.map(b => ({
+          id: b.id, name: b.name || b.id,
+          lat: b.lat, lng: b.lng,
+          depth: b.depth || "",
+          rovand: b.rovand || "",
+          maalepunkt: b.maalepunkt || "",
+          maalepunktHoejde: b.maalepunkt_hoejde || "",
+          casing: b.casing || { innerDia: "", outerDia: "", material: "PVC", flangeDN: "", flangeHoleDia: "" },
+          hasPump: !!b.has_pump,
+          pump: b.pump || { type: "", riser: "", depth: "", stages: "", hz: "", qNom: "" },
+          hasWellChamber: !!b.has_well_chamber,
+          well_chamber: b.well_chamber || {},
+          well_images: b.well_images || [],
+        })));
+      }
+      if (Array.isArray(opgaverData)) {
+        setTasks(opgaverData.map(t => ({
+          id: t.id, wellId: t.well_id,
+          type: t.type, date: t.date,
+          notes: t.notes || "", techName: t.tech_name || "", techPhone: t.tech_phone || "",
+          images: t.images || [],
+          sloejfning: t.task_data?.sloejfning || { method: "", fillingMaterial: "", topSeal: "", approvalRef: "" },
+          sloejfningData: t.task_data?.sloejfningData || t.task_data || null,
+        })));
+      }
+      setDbLoaded(true);
+    });
+  }, []);
   const [selectedWell, setSelectedWell] = useState(null);
   const [editingWell, setEditingWell] = useState(null);
   const [activeTask, setActiveTask] = useState(null);
@@ -1032,13 +1068,29 @@ function App() {
     setView("editWell");
   };
 
-  const saveWell = () => {
+  const saveWell = async () => {
     if (!editingWell.name.trim()) { showToast("⚠️ Angiv boringens navn/ID"); return; }
     if (wells.find(w => w.id === editingWell.id)) {
       setWells(ws => ws.map(w => w.id === editingWell.id ? editingWell : w));
     } else {
       setWells(ws => [...ws, editingWell]);
     }
+    try {
+      await fetch(DB + "?table=boringer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingWell.id, name: editingWell.name,
+          lat: editingWell.lat, lng: editingWell.lng,
+          depth: editingWell.depth, rovand: editingWell.rovand,
+          maalepunkt: editingWell.maalepunkt,
+          maalepunktHoejde: editingWell.maalepunktHoejde,
+          casing: editingWell.casing, hasPump: editingWell.hasPump,
+          pump: editingWell.pump, hasWellChamber: editingWell.hasWellChamber,
+          wellChamber: editingWell.well_chamber,
+          wellImages: editingWell.well_images || [],
+        }),
+      });
+    } catch(e) { console.warn("DB-save boring fejlede:", e); }
     setEditingWell(null);
     setView("wells");
     showToast("✅ Boring gemt");
@@ -1071,15 +1123,36 @@ function App() {
       renovering: { description: "", materialsUsed: "", newParts: "" },
       opfoering: { fromDepth: "", toDepth: "", materials: "", sealType: "" },
       foring: { foringType: "", diameter: "", length: "", material: "" },
-      sloejfning: { method: "", fillingMaterial: "", topSeal: "", approvalRef: "" },
+      sloejfning: { method: "", fillingMaterial: "", topSeal: "", approvalRef: "", dato: "", udfoertAf: "", noter: "", antalBlandinger: "", volPerBlanding: "", kontrolRumvaegt: "", cementKg: "", bentonitKg: "" },
       techName: "", techPhone: "",
     });
     setView("task");
   };
 
-  const saveTask = () => {
+  const saveTask = async () => {
     if (!activeTask.type) { showToast("⚠️ Vælg opgavetype"); return; }
-    setTasks(ts => [activeTask, ...ts]);
+    setTasks(ts => {
+      const exists = ts.find(t => t.id === activeTask.id);
+      return exists ? ts.map(t => t.id === activeTask.id ? activeTask : t) : [activeTask, ...ts];
+    });
+    // Gem/opdater i Supabase
+    try {
+      await fetch(DB + "?table=opgaver", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: activeTask.id,
+          wellId: activeTask.wellId,
+          type: activeTask.type,
+          date: activeTask.date || new Date().toISOString(),
+          notes: activeTask.notes,
+          techName: activeTask.techName,
+          techPhone: activeTask.techPhone,
+          images: activeTask.images || [],
+          sloejfning: activeTask.sloejfning,
+          sloejfningData: activeTask.sloejfningData,
+        }),
+      });
+    } catch(e) { console.warn("DB-save opgave fejlede:", e); }
     setActiveTask(null);
     setView("wells");
     setTab("tasks");
@@ -1466,20 +1539,193 @@ function App() {
         </>)}
 
         {t.type === "sloejfning" && (<>
-          <div className="section-label">Sløjfning</div>
+          {/* ── Sløjfning: Boringskonstruktion ── */}
+          <div className="section-label">📋 Boringskonstruktion</div>
           <div className="card">
-            <div className="field"><label>Sløjfningsmetode</label>
-              <input value={t.sloejfning.method} onChange={e => setTaskField("sloejfning", "method", e.target.value)} placeholder="f.eks. Cementopfyldning" />
+            <div className="card-grid">
+              <div className="field">
+                <label>Sag / DGU</label>
+                <input readOnly style={{background:"#f0f6ff"}}
+                  value={(t.sloejfningData?.sagsnummer || "") + " · " + (t.sloejfningData?.boringer?.map(b=>b.dgu).join(", ") || "")} />
+              </div>
+              <div className="field">
+                <label>Adresse</label>
+                <input readOnly style={{background:"#f0f6ff"}}
+                  value={t.sloejfningData?.adresse || t.sloejfningData?.boringer?.[0]?.naermestAdresse || ""} />
+              </div>
             </div>
-            <div className="field"><label>Fyldmateriale</label>
-              <input value={t.sloejfning.fillingMaterial} onChange={e => setTaskField("sloejfning", "fillingMaterial", e.target.value)} placeholder="Cement, bentonit, sand…" />
+            <div className="card-grid">
+              <div className="field">
+                <label>Sløjfning udført dato</label>
+                <input type="date"
+                  value={(t.sloejfning.dato || "")}
+                  onChange={e => setTaskField("sloejfning","dato",e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Udført af</label>
+                <input value={t.sloejfning.udfoertAf || ""}
+                  onChange={e => setTaskField("sloejfning","udfoertAf",e.target.value)}
+                  placeholder="Navn / firma" />
+              </div>
             </div>
-            <div className="field"><label>Top-forsegling</label>
-              <input value={t.sloejfning.topSeal} onChange={e => setTaskField("sloejfning", "topSeal", e.target.value)} placeholder="Type og dybde" />
+            {(t.sloejfningData?.boringer || []).map((b, bi) => (
+              <div key={bi} style={{borderTop:"1px solid #dce8f5",marginTop:8,paddingTop:8}}>
+                <div style={{fontWeight:700,color:"#1169b0",marginBottom:6}}>DGU {b.dgu || "–"}</div>
+                <div className="card-grid">
+                  <div className="field"><label>Forerør Ø (mm)</label>
+                    <input type="number"
+                      value={(t.sloejfning["forerDia_"+bi] ?? (b.forerDia || ""))}
+                      onChange={e => setTaskField("sloejfning","forerDia_"+bi,e.target.value)}
+                      placeholder={b.forerDia || "mm"} />
+                  </div>
+                  <div className="field"><label>Forerør top (m.u.t.)</label>
+                    <input type="number" step="0.01"
+                      value={(t.sloejfning["forerTop_"+bi] ?? (b.forerTop || ""))}
+                      onChange={e => setTaskField("sloejfning","forerTop_"+bi,e.target.value)}
+                      placeholder={b.forerTop || "m"} />
+                  </div>
+                  <div className="field"><label>Bundpejling (m.u.t.)</label>
+                    <input type="number" step="0.01"
+                      value={(t.sloejfning["bundpejling_"+bi] ?? (b.bundpejling || ""))}
+                      onChange={e => setTaskField("sloejfning","bundpejling_"+bi,e.target.value)}
+                      placeholder={b.bundpejling || "m"} />
+                  </div>
+                  <div className="field"><label>Rovandspejl (m.u.t.)</label>
+                    <input type="number" step="0.01"
+                      value={(t.sloejfning["rovandspejl_"+bi] ?? (b.rovandspejl || ""))}
+                      onChange={e => setTaskField("sloejfning","rovandspejl_"+bi,e.target.value)}
+                      placeholder={b.rovandspejl || "m"} />
+                  </div>
+                  <div className="field"><label>Pejledato</label>
+                    <input type="date"
+                      value={(t.sloejfning["pejledato_"+bi] || "")}
+                      onChange={e => setTaskField("sloejfning","pejledato_"+bi,e.target.value)} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── Sløjfning: Faktiske mængder ── */}
+          <div className="section-label">⚖️ Faktiske sløjfningsmængder</div>
+          <div className="card" style={{padding:0,overflow:"hidden"}}>
+            {/* Tabel-header */}
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
+              background:"#dce8f5",padding:"8px 10px",
+              fontSize:11,fontWeight:700,color:"#1169b0"}}>
+              {["Materiale","Fra m.u.t.","Til m.u.t.","Teor. kg","Fakt. kg"].map(c =>
+                <span key={c}>{c}</span>)}
             </div>
-            <div className="field"><label>Godkendelsesreference</label>
-              <input value={t.sloejfning.approvalRef} onChange={e => setTaskField("sloejfning", "approvalRef", e.target.value)} placeholder="Myndighedsreference" />
-            </div>
+            {(t.sloejfningData?.lag || []).filter(l => l.fraM || l.tilM).map((l, li) => (
+              <div key={li} style={{display:"grid",
+                gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
+                padding:"6px 10px",alignItems:"center",
+                borderTop:"1px solid #edf3fa",
+                background: li%2===0 ? "#fff" : "#f7fbff"}}>
+                <span style={{fontSize:12,fontWeight:600}}>{l.materiale}</span>
+                <span style={{fontSize:11,color:"#666"}}>{l.fraM}</span>
+                <span style={{fontSize:11,color:"#666"}}>{l.tilM}</span>
+                <span style={{fontSize:11,background:"#edf3fa",borderRadius:4,
+                  padding:"1px 5px",color:"#1169b0"}}>{l.teoretiskKg} kg</span>
+                <input type="number" step="0.1"
+                  style={{border:"1px solid #b8d0e8",borderRadius:4,
+                    padding:"3px 6px",fontSize:12,width:"100%"}}
+                  placeholder="kg"
+                  value={(t.sloejfning["faktiskKg_"+li] || "")}
+                  onChange={e => setTaskField("sloejfning","faktiskKg_"+li,e.target.value)} />
+              </div>
+            ))}
+            {/* Total */}
+            {(t.sloejfningData?.lag || []).length > 0 && (
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",
+                padding:"8px 10px",background:"#dce8f5",borderTop:"2px solid #b8d0e8"}}>
+                <span style={{fontWeight:700,color:"#1169b0",gridColumn:"1/4"}}>TOTAL</span>
+                <span style={{fontSize:11,background:"#edf3fa",borderRadius:4,
+                  padding:"1px 5px",color:"#1169b0"}}>
+                  {(t.sloejfningData?.lag||[]).reduce((s,l)=>s+(parseFloat(l.teoretiskKg)||0),0).toFixed(1)} kg
+                </span>
+                <span style={{fontSize:11,fontWeight:700,color:"#27ae60"}}>
+                  {Object.entries(t.sloejfning||{})
+                    .filter(([k])=>k.startsWith("faktiskKg_"))
+                    .reduce((s,[,v])=>s+(parseFloat(v)||0),0)
+                    .toFixed(1)} kg
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Cementgrout støbejournal ── */}
+          {t.sloejfningData?.harCement && (
+            <>
+              <div className="section-label">🪣 Støbejournal – Cementgrout</div>
+              <div className="card">
+                <div className="card-grid">
+                  <div className="field"><label>Antal blandinger</label>
+                    <input type="number"
+                      value={t.sloejfning.antalBlandinger || ""}
+                      onChange={e => setTaskField("sloejfning","antalBlandinger",e.target.value)} />
+                  </div>
+                  <div className="field"><label>Vol. per blanding (L)</label>
+                    <input type="number"
+                      value={t.sloejfning.volPerBlanding || ""}
+                      onChange={e => setTaskField("sloejfning","volPerBlanding",e.target.value)} />
+                  </div>
+                  <div className="field"><label>Total nedpumpet (L)</label>
+                    <input readOnly style={{background:"#f0f6ff"}}
+                      value={t.sloejfning.antalBlandinger && t.sloejfning.volPerBlanding
+                        ? (parseFloat(t.sloejfning.antalBlandinger)*parseFloat(t.sloejfning.volPerBlanding)).toFixed(0) + " L"
+                        : ""} />
+                  </div>
+                  <div className="field"><label>Kontrolrumvægt (g/cm³)</label>
+                    <input type="number" step="0.01"
+                      value={t.sloejfning.kontrolRumvaegt || ""}
+                      onChange={e => setTaskField("sloejfning","kontrolRumvaegt",e.target.value)} />
+                  </div>
+                  <div className="field"><label>Cementforbrug (kg)</label>
+                    <input type="number"
+                      value={t.sloejfning.cementKg || ""}
+                      onChange={e => setTaskField("sloejfning","cementKg",e.target.value)} />
+                  </div>
+                  <div className="field"><label>Bentonitforbrug (kg)</label>
+                    <input type="number"
+                      value={t.sloejfning.bentonitKg || ""}
+                      onChange={e => setTaskField("sloejfning","bentonitKg",e.target.value)} />
+                  </div>
+                </div>
+                {/* Støbnings-rækker */}
+                <div style={{marginTop:10}}>
+                  <div style={{fontWeight:700,fontSize:12,color:"#1169b0",marginBottom:6}}>
+                    Individuelle støbninger (10 blandinger)
+                  </div>
+                  {Array.from({length:10},(_,i)=>(
+                    <div key={i} style={{display:"grid",
+                      gridTemplateColumns:"30px 1fr 1fr",gap:6,
+                      marginBottom:4,alignItems:"center"}}>
+                      <span style={{textAlign:"center",fontWeight:700,
+                        color:"#1169b0",fontSize:12}}>{i+1}</span>
+                      <input type="number" step="0.1" placeholder="Vol. (L)"
+                        style={{border:"1px solid #b8d0e8",borderRadius:4,padding:"4px 8px",fontSize:12}}
+                        value={t.sloejfning["stoebning_vol_"+i] || ""}
+                        onChange={e => setTaskField("sloejfning","stoebning_vol_"+i,e.target.value)} />
+                      <input type="number" step="1" placeholder="Poser á 25 kg"
+                        style={{border:"1px solid #b8d0e8",borderRadius:4,padding:"4px 8px",fontSize:12}}
+                        value={t.sloejfning["stoebning_poser_"+i] || ""}
+                        onChange={e => setTaskField("sloejfning","stoebning_poser_"+i,e.target.value)} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Bemærkninger ── */}
+          <div className="section-label">📝 Bemærkninger og afvigelser</div>
+          <div className="card">
+            <textarea rows={3} style={{width:"100%",border:"1px solid #b8d0e8",
+              borderRadius:6,padding:8,fontSize:13}}
+              placeholder="Afvigelser, observationer, særlige forhold..."
+              value={t.sloejfning.noter || ""}
+              onChange={e => setTaskField("sloejfning","noter",e.target.value)} />
           </div>
         </>)}
 
@@ -1519,16 +1765,27 @@ function App() {
       {tasks.length === 0 ? (
         <div className="empty"><div className="icon">📋</div><p>Ingen opgaver gemt endnu</p></div>
       ) : tasks.map(t => (
-        <div key={t.id} className="task-item">
+        <div key={t.id} className="task-item"
+          onClick={() => {
+            // Åbn opgaven til redigering
+            const well = wells.find(w => w.id === t.wellId);
+            setSelectedWell(well || null);
+            setActiveTask(t);
+            setView("task");
+          }}
+          style={{ cursor: "pointer" }}>
           <div className="task-header">
             <span className="task-tag">{t.type ? taskTypeLabel(t.type) : "Ukendt"}</span>
             <span className="task-date">{fmtDate(t.date)}</span>
+            <span style={{ fontSize: 11, color: "#1169b0", marginLeft: "auto" }}>✏️ Åbn</span>
           </div>
           <div className="task-well">⛏️ {wellName(t.wellId)}</div>
           <div className="task-summary">
-            📍 {fmtCoord(t.gps.lat, t.gps.lng)}
-            {t.images.length > 0 ? ` · 📸 ${t.images.length} billeder` : ""}
-            {t.notes ? ` · ${t.notes.slice(0, 50)}…` : ""}
+            {t.type === "sloejfning" && t.sloejfningData
+              ? "📋 " + (t.sloejfningData.sagsnummer || "") + " · " + (t.sloejfningData.boringer?.map(b => b.dgu).join(", ") || "")
+              : "📍 " + fmtCoord((t.gps || {}).lat, (t.gps || {}).lng)}
+            {t.images && t.images.length > 0 ? " · 📸 " + t.images.length + " billeder" : ""}
+            {t.notes ? " · " + t.notes.slice(0, 50) : ""}
           </div>
         </div>
       ))}
