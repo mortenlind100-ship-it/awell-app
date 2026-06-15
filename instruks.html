@@ -938,7 +938,12 @@ function beregnLag(lag, bundpejling, primærBoring) {
     // Dette sikrer at laget placeres præcis i sektionens interval uanset bundpejling
     if (l.sektion && l.sektionFra != null && l.sektionTil != null) {
       const sTil = parseFloat(l.sektionTil);
-      const sFra = parseFloat(l.sektionFra);
+      // For forerør/filter-sektioner: start ikke i brønd-zonen
+      // (brønden sløjfes separat med eget lag – forerøret starter ved brøndgulv)
+      const sFraRaw = parseFloat(l.sektionFra);
+      const sFra = (!l.sektion.startsWith("brond_") && brondDybde > 0 && sFraRaw < brondDybde)
+        ? brondDybde
+        : sFraRaw;
       if (!isNaN(sTil) && !isNaN(sFra) && sTil > sFra) {
         const subLagSektion = splitVedDiaSkift(sFra, sTil, forerSections, filterSections, brondDybde)
           .map(s => {
@@ -2471,7 +2476,7 @@ function App() {
             filterSections={primær.filterSections}
             brondDybde={brondDybde}
             brondDia={primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
-              ? 2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI)
+              ? Math.round(2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI))
               : parseFloat(primær.brondDia) || 0}
             type={primær.type}
             litho={primær.litho || []}
