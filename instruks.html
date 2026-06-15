@@ -1335,9 +1335,9 @@ function BoringKort({ b, i, onChange, onFjern }) {
         <strong style={{ color: C.blue, fontFamily: "'Montserrat', sans-serif", fontSize: 14 }}>
           {i === 0 ? "Primær boring / brønd" : "Boring " + (i + 1)}
         </strong>
-        {i > 0 && <button onClick={onFjern}
+        <button onClick={onFjern}
           style={{ background: "none", border: "none", cursor: "pointer",
-            color: C.red, fontSize: 20, lineHeight: 1 }}>✕</button>}
+            color: C.red, fontSize: 20, lineHeight: 1 }}>✕</button>
       </div>
 
       {/* DGU + Jupiter */}
@@ -1788,9 +1788,9 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
           <label style={lbl}>Mængde (kg)</label>
           <input style={inp} type="number" step="0.1"
             value={lag.kg} onChange={e => {
-                // Ryd sektionsgrænser når kg ændres manuelt
-                // -> beregnLag bruger iterativ beregning i stedet for fast placering
-                onChange({ ...lag, kg: e.target.value, sektionFra: null, sektionTil: null });
+                // Behold sektionsgrænser ved kg-ændring hvis sektion er valgt
+                // (sektionen fastlægger placering, kg fastlægger mængde)
+                onChange({ ...lag, kg: e.target.value });
               }} placeholder="kg" />
           {mat && <div style={{ fontSize: 10, color: C.text2, marginTop: 2 }}>{mat.kgPerL} kg/L</div>}
         </div>
