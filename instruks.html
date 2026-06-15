@@ -951,17 +951,30 @@ function beregnLag(lag, bundpejling, primærBoring) {
       // (forerøret fyldes med boringmateriale fra forerørtop til bund)
       const sFra = parseFloat(l.sektionFra);
       if (!isNaN(sTil) && !isNaN(sFra) && sTil > sFra) {
+        const erBrondSek = l.sektion && l.sektion.startsWith("brond_");
         const subLagSektion = splitVedDiaSkift(sFra, sTil, forerSections, filterSections, brondDybde)
           .map(s => {
             const midDybde = (s.fra + s.til) / 2;
-            const subDia = diaVedDybde(midDybde, forerSections, filterSections, brondDybde, brondDia)
-                        || parseFloat(l.diaMm) || 0;
+            const subDia = erBrondSek
+              ? brondDia
+              : (diaVedDybde(midDybde, forerSections, filterSections, brondDybde, brondDia)
+                 || parseFloat(l.diaMm) || 0);
             return { ...s, dia: subDia };
           });
         const diasArr = [...new Set(subLagSektion.map(s => s.dia).filter(Boolean))];
         const diaStr = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : "";
-        dybde = sFra; // opdater dybde til sektionens top
-        return { ...l, fraDybde: sFra, tilDybde: sTil, tykkelse: sTil - sFra,
+        // Brønd-sektion med manuel kg: genberegn tykkelse
+        let fraFinal = sFra;
+        if (erBrondSek && l.kg && parseFloat(l.kg) > 0 && brondDia > 0) {
+          const mat2 = MATERIALER.find(m => m.id === l.material);
+          if (mat2) {
+            const r2 = brondDia / 2 / 1000;
+            const h = parseFloat(l.kg) / (Math.PI * r2 * r2 * 1000 * mat2.kgPerL);
+            fraFinal = Math.max(0, sTil - h);
+          }
+        }
+        dybde = fraFinal;
+        return { ...l, fraDybde: fraFinal, tilDybde: sTil, tykkelse: sTil - fraFinal,
           subLag: subLagSektion, diaStr };
       }
     }
