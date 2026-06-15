@@ -284,7 +284,7 @@ function downloadPdf(projekt, boringer, beregnetLag, grej, friGrej, bundpejling,
   doc.text(titleLine, 10, y); y += 8;
 
   // Artesisk advarsel
-  if (projekt.artesisk) {
+  if (projekt.artesisk || boringer.some(b => b.artesisk)) {
     doc.setFillColor(253, 232, 232);
     doc.rect(10, y, W, 8, "F");
     doc.setFontSize(9); doc.setTextColor(192, 57, 43); doc.setFont("helvetica","bold");
@@ -1166,7 +1166,7 @@ xmlns="http://www.w3.org/TR/REC-html40">
 <h1>ARBEJDSINSTRUKS – SLØJFNING</h1>
 <p><strong>${(projekt.sagsnummer ? projekt.sagsnummer + "  ·  " : "") + (projekt.titel || "Sløjfning")}</strong>${dato ? "  &nbsp;|&nbsp;  " + dato : ""}</p>
 
-${projekt.artesisk ? '<div class="advarsel">⚠  ARTESISK BORING – boringen er artesisk (overtryk).</div>' : ""}
+${(projekt.artesisk || boringer.some(b => b.artesisk)) ? '<div class="advarsel">⚠  ARTESISK BORING – boringen er artesisk (overtryk).</div>' : ""}
 
 <h2>1.  Opgaveoversigt</h2>
 <table>
@@ -1644,10 +1644,25 @@ function BoringKort({ b, i, onChange, onFjern }) {
         </>}
       </div>
 
+      <div style={{ display: "flex", gap: 16, marginBottom: 10, flexWrap: "wrap" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6,
+          cursor: "pointer", fontSize: 13, fontWeight: 700,
+          color: b.artesisk ? C.red : C.text }}>
+          <input type="checkbox" checked={!!b.artesisk}
+            onChange={e => upd("artesisk", e.target.checked)} />
+          ⚠️ Artesisk boring
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6,
+          cursor: "pointer", fontSize: 13, fontWeight: 700, color: C.text }}>
+          <input type="checkbox" checked={!!b.pumpeSkalTraekkes}
+            onChange={e => upd("pumpeSkalTraekkes", e.target.checked)} />
+          Pumpe skal trækkes
+        </label>
+      </div>
       <div>
         <label style={lbl}>Bemærkninger til denne boring</label>
         <textarea style={{ ...ta, minHeight: 56 }}
-          placeholder="F.eks. artesisk, adgangsforhold, pumpe skal trækkes..."
+          placeholder="F.eks. adgangsforhold, særlige forholdsregler..."
           value={b.noter} onChange={e => upd("noter", e.target.value)} />
       </div>
 
@@ -1685,8 +1700,10 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
     && primær?.brondDia && primær?.brondDybde
     ? [{ id: "brond_0",
         label: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
-          ? "Brønd  0–" + primær.brondDybde + " m  ·  " + primær.brondLaengde + "×" + primær.brondBredde + " mm (firkantet)"
-          : "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm",
+          ? "Brønd (firkantet)  0–" + primær.brondDybde + " m  ·  " + primær.brondLaengde + "×" + primær.brondBredde + " mm  ·  Ækv. Ø" + Math.round(2*Math.sqrt((parseFloat(primær.brondLaengde)*parseFloat(primær.brondBredde))/Math.PI)) + " mm"
+          : primær.brondDia
+            ? "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm"
+            : "Brønd  0–" + primær.brondDybde + " m",
         dia: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
           ? 2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI)
           : parseFloat(primær.brondDia),
@@ -2161,7 +2178,7 @@ function nyBoring() {
     bundpejling: "", rovandspejlFelt: "",
     forerDiaFelt: "", forerBundFelt: "",
     filterDiaFelt: "", filterFraFelt: "", filterTilFelt: "",
-    brondDia: "", brondDybde: "", brondFirkantet: false, brondLaengde: "", brondBredde: "", noter: "",
+    brondDia: "", brondDybde: "", brondFirkantet: false, brondLaengde: "", brondBredde: "", artesisk: false, pumpeSkalTraekkes: false, noter: "",
     jupiterOk: false, jupiterAdresse: "",
     totaldybde: "", rovandspejl: "",
     forerDia: "", forerBund: "", forerSections: [],
@@ -2341,19 +2358,7 @@ function App() {
           <div style={{ display: "flex", gap: 24, margin: "12px 0 16px",
             padding: "12px 16px", background: "#fff8e1", borderRadius: 8,
             border: "1px solid #ffe082" }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
-              fontSize: 13, fontWeight: 700,
-              color: projekt.artesisk ? C.red : C.text }}>
-              <input type="checkbox" checked={projekt.artesisk}
-                onChange={e => updP("artesisk", e.target.checked)} />
-              ⚠️ Artesisk boring
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8,
-              cursor: "pointer", fontSize: 13, fontWeight: 700, color: C.text }}>
-              <input type="checkbox" checked={projekt.pumpeSkalTraekkes}
-                onChange={e => updP("pumpeSkalTraekkes", e.target.checked)} />
-              Pumpe skal trækkes
-            </label>
+            
           </div>
           <F label="Opgavebeskrivelse" col2>
             <textarea style={{ ...ta, minHeight: 80 }} value={projekt.opgaveBeskrivelse}
@@ -2434,7 +2439,7 @@ function App() {
           </div>
 
           <p style={{ fontSize: 13, color: C.text2, marginBottom: 10, lineHeight: 1.6 }}>
-            Angiv materialer <strong>fra bunden og op</strong> (lag 1 = nederst).
+            Angiv materialer <strong>fra bunden og op</strong> (lag 1 = øverst).
             Dybder beregnes automatisk ud fra bundpejling og diameter.
           </p>
           {!bundpejling && (
