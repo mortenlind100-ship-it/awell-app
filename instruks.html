@@ -1696,8 +1696,12 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
     label: "Filter  " + s.fra + "–" + s.til + " m  ·  Ø" + s.dia + " mm  ·  " + s.materiale,
     dia: s.dia, laengde: s.til - s.fra, fraM: s.fra, tilM: s.til,
   }));
+  // Firkantet brønd: brondDia er tom (beregnet) – tjek brondLaengde+brondBredde i stedet
+  const harBrondDia = primær?.brondFirkantet
+    ? (primær?.brondLaengde && primær?.brondBredde && primær?.brondDybde)
+    : (primær?.brondDia && primær?.brondDybde);
   const brondSek = (primær?.type === "boring_med_brønd" || primær?.type === "brønd")
-    && primær?.brondDia && primær?.brondDybde
+    && harBrondDia
     ? [{ id: "brond_0",
         label: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
           ? "Brønd (firkantet)  0–" + primær.brondDybde + " m  ·  " + primær.brondLaengde + "×" + primær.brondBredde + " mm  ·  Ækv. Ø" + Math.round(2*Math.sqrt((parseFloat(primær.brondLaengde)*parseFloat(primær.brondBredde))/Math.PI)) + " mm"
