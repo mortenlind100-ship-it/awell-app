@@ -859,9 +859,18 @@ function beregnVolumen(diaMm, laengdeM) {
 // Returnerer diameter (mm) ved en given dybde ud fra forerSections + filterSections
 function diaVedDybde(dybde, forerSections, filterSections, brondDybde, brondDia) {
   // Brønd-zone: 0 til brondDybde m.u.t.
-  // Materialet fylder hele brøndens tværsnit (Ø3000) – forerøret stikker bare op
-  // igennem brønden men fortrænger ikke materialet væsentligt i beregningen.
+  // Hvis der er en forerør/filter-sektion her (forerøret stikker op i brønden)
+  // bruges forerørets diameter (vi fylder INDE I røret).
+  // Hvis ingen boring-sektion → ren brønd → brondDia.
   if (brondDybde > 0 && brondDia > 0 && dybde <= brondDybde) {
+    // Check om der er en boring-sektion her
+    for (const fs of (filterSections || [])) {
+      if (dybde >= fs.fra && dybde <= fs.til) return fs.dia;
+    }
+    for (const fr of (forerSections || [])) {
+      if (dybde >= fr.top && dybde <= fr.bund) return fr.dia;
+    }
+    // Ingen boring-sektion i brønd-zonen → brønd-diameter
     return brondDia;
   }
 
@@ -938,12 +947,9 @@ function beregnLag(lag, bundpejling, primærBoring) {
     // Dette sikrer at laget placeres præcis i sektionens interval uanset bundpejling
     if (l.sektion && l.sektionFra != null && l.sektionTil != null) {
       const sTil = parseFloat(l.sektionTil);
-      // For forerør/filter-sektioner: start ikke i brønd-zonen
-      // (brønden sløjfes separat med eget lag – forerøret starter ved brøndgulv)
-      const sFraRaw = parseFloat(l.sektionFra);
-      const sFra = (!l.sektion.startsWith("brond_") && brondDybde > 0 && sFraRaw < brondDybde)
-        ? brondDybde
-        : sFraRaw;
+      // Sektionsgrænserne bruges direkte – forerøret kan godt starte inde i brønden
+      // (forerøret fyldes med boringmateriale fra forerørtop til bund)
+      const sFra = parseFloat(l.sektionFra);
       if (!isNaN(sTil) && !isNaN(sFra) && sTil > sFra) {
         const subLagSektion = splitVedDiaSkift(sFra, sTil, forerSections, filterSections, brondDybde)
           .map(s => {
@@ -978,7 +984,8 @@ function beregnLag(lag, bundpejling, primærBoring) {
 
     // Find alle diameter-skift-punkter fra dybde og opad mod 0
     // Saml breakpoints: brønd-grænse + forerør-skift + filter-skift
-    // Breakpoints: altid terræn-relative m.u.t. – ingen brondDybde-offset
+    // Breakpoints: altid terræn-relative m.u.t.
+    // Inkluderer brønd-grænse OG forerørtop inde i brønden
     const allBreaks = new Set([0]);
     if (brondDybde > 0) allBreaks.add(brondDybde); // brønd-/boring-overgang
     (forerSections || []).forEach(fr => {
@@ -987,6 +994,9 @@ function beregnLag(lag, bundpejling, primærBoring) {
     (filterSections || []).forEach(fs => {
       allBreaks.add(fs.fra); allBreaks.add(fs.til);
     });
+    // Forerørtop inde i brønd-zone tilføjes eksplicit (skifte fra forerDia til brondDia)
+    const forerTopInBrond = (forerSections || []).filter(fr => fr.top < brondDybde && fr.top > 0);
+    forerTopInBrond.forEach(fr => allBreaks.add(fr.top));
     // Sortér faldende (dybeste til øverste)
     const breaksSorted = Array.from(allBreaks).filter(b => b <= dybde).sort((a, b) => b - a);
 
@@ -1714,7 +1724,7 @@ function LagRaekke({ lag, i, onChange, onFjern, calc, primær }) {
             ? "Brønd  0–" + primær.brondDybde + " m  ·  Ø" + primær.brondDia + " mm"
             : "Brønd  0–" + primær.brondDybde + " m",
         dia: primær.brondFirkantet && primær.brondLaengde && primær.brondBredde
-          ? 2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI)
+          ? Math.round(2 * Math.sqrt((parseFloat(primær.brondLaengde) * parseFloat(primær.brondBredde)) / Math.PI))
           : parseFloat(primær.brondDia),
         laengde: parseFloat(primær.brondDybde),
         fraM: 0, tilM: parseFloat(primær.brondDybde) }]
