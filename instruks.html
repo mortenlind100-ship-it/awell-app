@@ -932,7 +932,7 @@ function beregnLag(lag, bundpejling, primærBoring) {
                           ? (parseFloat(primærBoring?.brondDybde) || 0) : 0;
   // For firkantet brønd: beregn ækvivalent cirkeldiameter = 2*sqrt(L*B/π)
   const brondDiaRaw    = primærBoring?.brondFirkantet && primærBoring?.brondLaengde && primærBoring?.brondBredde
-    ? 2 * Math.sqrt((parseFloat(primærBoring.brondLaengde) * parseFloat(primærBoring.brondBredde)) / Math.PI)
+    ? Math.round(2 * Math.sqrt((parseFloat(primærBoring.brondLaengde) * parseFloat(primærBoring.brondBredde)) / Math.PI))
     : (parseFloat(primærBoring?.brondDia) || 0);
   const brondDia       = brondDybde > 0 ? brondDiaRaw : 0;
 
@@ -963,18 +963,19 @@ function beregnLag(lag, bundpejling, primærBoring) {
           });
         const diasArr = [...new Set(subLagSektion.map(s => s.dia).filter(Boolean))];
         const diaStr = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : "";
-        // Brønd-sektion med manuel kg: genberegn tykkelse
+        // Brønd-sektion: tilDybde = current dybde (don't overshoot into already-filled zone)
+        const tilFinal = erBrondSek ? Math.min(sTil, dybde) : sTil;
         let fraFinal = sFra;
         if (erBrondSek && l.kg && parseFloat(l.kg) > 0 && brondDia > 0) {
           const mat2 = MATERIALER.find(m => m.id === l.material);
           if (mat2) {
             const r2 = brondDia / 2 / 1000;
             const h = parseFloat(l.kg) / (Math.PI * r2 * r2 * 1000 * mat2.kgPerL);
-            fraFinal = Math.max(0, sTil - h);
+            fraFinal = Math.max(0, tilFinal - h);
           }
         }
         dybde = fraFinal;
-        return { ...l, fraDybde: fraFinal, tilDybde: sTil, tykkelse: sTil - fraFinal,
+        return { ...l, fraDybde: fraFinal, tilDybde: tilFinal, tykkelse: tilFinal - fraFinal,
           subLag: subLagSektion, diaStr };
       }
     }
