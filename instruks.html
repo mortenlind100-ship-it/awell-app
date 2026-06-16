@@ -963,8 +963,8 @@ function beregnLag(lag, bundpejling, primærBoring) {
           });
         const diasArr = [...new Set(subLagSektion.map(s => s.dia).filter(Boolean))];
         const diaStr = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : "";
-        // Brønd-sektion: tilDybde = current dybde (don't overshoot into already-filled zone)
-        const tilFinal = erBrondSek ? Math.min(sTil, dybde) : sTil;
+        // Brønd-sektion: altid hele brøndens interval (uafhængig af boring-lagene)
+        const tilFinal = sTil;
         let fraFinal = sFra;
         if (erBrondSek && l.kg && parseFloat(l.kg) > 0 && brondDia > 0) {
           const mat2 = MATERIALER.find(m => m.id === l.material);
