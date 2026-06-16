@@ -980,24 +980,28 @@ function beregnLag(lag, bundpejling, primærBoring) {
           });
         const diasArr = [...new Set(subLagSektion.map(s => s.dia).filter(Boolean))];
         const diaStr = diasArr.length > 0 ? diasArr.join(" / ") + " mm" : "";
-        // Brønd-sektion: lag lægges oven på det forrige brønd-lag
-        // brondFyldTop starter ved brondDybde og bevæger sig opad for hvert brønd-lag
-        if (brondFyldTop === null) brondFyldTop = brondDybde; // første brønd-lag
-        const tilFinal = brondFyldTop; // laget slutter ved toppen af forrige brønd-lag
-        let fraFinal = sFra; // default: fra sektionens bund
-        if (l.kg && parseFloat(l.kg) > 0 && brondDia > 0) {
-          const mat2 = MATERIALER.find(m => m.id === l.material);
-          if (mat2) {
-            const r2 = brondDia / 2 / 1000;
-            const h = parseFloat(l.kg) / (Math.PI * r2 * r2 * 1000 * mat2.kgPerL);
-            fraFinal = Math.max(0, tilFinal - h);
-          }
-        }
+        // Beregn fraFinal og tilFinal afhængigt af sektion-type
+        let fraFinal, tilFinal;
         if (erBrondSek) {
+          // Brønd-sektion: lag stakkes oven på forrige brønd-lag
+          if (brondFyldTop === null) brondFyldTop = brondDybde;
+          tilFinal = brondFyldTop;
+          fraFinal = sFra; // default: fra sektionens bund (0)
+          if (l.kg && parseFloat(l.kg) > 0 && brondDia > 0) {
+            const mat2 = MATERIALER.find(m => m.id === l.material);
+            if (mat2) {
+              const r2 = brondDia / 2 / 1000;
+              const h = parseFloat(l.kg) / (Math.PI * r2 * r2 * 1000 * mat2.kgPerL);
+              fraFinal = Math.max(0, tilFinal - h);
+            }
+          }
           brondFyldTop = fraFinal; // næste brønd-lag starter her
+        } else {
+          // Boring-sektion: placeres præcist ved sektionens bounds
+          fraFinal = sFra;
+          tilFinal = sTil;
+          // dybde opdateres IKKE – boring-sektion-lag er selvpositionerende
         }
-        // Boring-lag med fast sektion er selvpositionerende – opdater ikke dybde
-        // (dybde bruges kun til iterativ fyldning fra bundpejling for lag uden sektion)
         return { ...l, fraDybde: fraFinal, tilDybde: tilFinal, tykkelse: tilFinal - fraFinal,
           subLag: subLagSektion, diaStr };
       }
