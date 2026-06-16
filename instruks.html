@@ -978,7 +978,11 @@ function beregnLag(lag, bundpejling, primærBoring) {
             fraFinal = Math.max(0, tilFinal - h);
           }
         }
-        brondFyldTop = fraFinal; // næste brønd-lag starter her
+        if (erBrondSek) {
+          brondFyldTop = fraFinal; // næste brønd-lag starter her
+        } else {
+          dybde = fraFinal; // næste boring-lag starter her
+        }
         return { ...l, fraDybde: fraFinal, tilDybde: tilFinal, tykkelse: tilFinal - fraFinal,
           subLag: subLagSektion, diaStr };
       }
