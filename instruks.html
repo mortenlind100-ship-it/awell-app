@@ -947,11 +947,26 @@ function beregnLag(lag, bundpejling, primærBoring) {
 
     // Hvis en sektion er valgt, brug dens bounds direkte som tilDybde/fraDybde
     // Dette sikrer at laget placeres præcis i sektionens interval uanset bundpejling
-    if (l.sektion && l.sektionFra != null && l.sektionTil != null) {
-      const sTil = parseFloat(l.sektionTil);
+    // Slå sektionsgrænser op fra primærBoring hvis de mangler på laget (bagudkompatibilitet)
+    let resolvedFra = l.sektionFra, resolvedTil = l.sektionTil;
+    if (l.sektion && (l.sektionFra == null || l.sektionTil == null)) {
+      const sid = l.sektion;
+      if (sid.startsWith("forer_")) {
+        const i2 = parseInt(sid.split("_")[1]);
+        const fr = forerSections[i2];
+        if (fr) { resolvedFra = fr.top; resolvedTil = fr.bund; }
+      } else if (sid.startsWith("filter_")) {
+        const i2 = parseInt(sid.split("_")[1]);
+        const fs = filterSections[i2];
+        if (fs) { resolvedFra = fs.fra; resolvedTil = fs.til; }
+      } else if (sid.startsWith("brond_")) {
+        resolvedFra = 0; resolvedTil = brondDybde;
+      }
+    }
+    if (l.sektion && resolvedFra != null && resolvedTil != null) {
+      const sTil = parseFloat(resolvedTil);
       // Sektionsgrænserne bruges direkte – forerøret kan godt starte inde i brønden
-      // (forerøret fyldes med boringmateriale fra forerørtop til bund)
-      const sFra = parseFloat(l.sektionFra);
+      const sFra = parseFloat(resolvedFra);
       if (!isNaN(sTil) && !isNaN(sFra) && sTil > sFra) {
         const erBrondSek = l.sektion && l.sektion.startsWith("brond_");
         const subLagSektion = splitVedDiaSkift(sFra, sTil, forerSections, filterSections, brondDybde)
