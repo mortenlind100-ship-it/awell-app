@@ -980,9 +980,9 @@ function beregnLag(lag, bundpejling, primærBoring) {
         }
         if (erBrondSek) {
           brondFyldTop = fraFinal; // næste brønd-lag starter her
-        } else {
-          dybde = fraFinal; // næste boring-lag starter her
         }
+        // Boring-lag med fast sektion er selvpositionerende – opdater ikke dybde
+        // (dybde bruges kun til iterativ fyldning fra bundpejling for lag uden sektion)
         return { ...l, fraDybde: fraFinal, tilDybde: tilFinal, tykkelse: tilFinal - fraFinal,
           subLag: subLagSektion, diaStr };
       }
